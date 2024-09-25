@@ -16,6 +16,8 @@ pub struct NoteEffects {
     pub envelope: Option<EnvelopeEffect>,
     #[serde(default)]
     pub pan: Option<PanEffect>,
+    #[serde(default)]
+    pub soft_kill: Option<SoftKillEffect>,
     // remember to implement add_from_other when adding new effects
 }
 
@@ -35,6 +37,7 @@ impl NoteEffects {
         add_effect!(slide);
         add_effect!(envelope);
         add_effect!(pan);
+        add_effect!(soft_kill);
     }
 }
 
@@ -88,4 +91,9 @@ pub struct EnvelopeEffect {
 #[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanEffect {
     pub value: f32,
+}
+
+#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SoftKillEffect {
+    pub delay_ticks: f32,
 }

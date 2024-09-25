@@ -216,6 +216,7 @@ impl InstrumentUI {
         if let Some(selected_dt) = s.selected_data_table {
             if let Some(dt) = s.data_tables.get_mut(selected_dt) {
                 s.graph.waveform_graph(ui, dt);
+                ui.separator();
                 adsr_graph::adsr_graph(ui, &mut dt.new_envelope);
             }
         }
@@ -290,6 +291,7 @@ impl InstrumentUI {
             .viewed_instrument
             .and_then(|id| project.instruments().get(&id))
         else {
+            s.instrument_id = None;
             return;
         };
 

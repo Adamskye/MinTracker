@@ -38,6 +38,7 @@ impl WaveformGraph {
             });
             Self::draw_waveform_graph(ui, data_table);
             self.draw_windows(ui, data_table);
+            Self::draw_info(ui, &*data_table);
         });
     }
 
@@ -346,5 +347,14 @@ impl WaveformGraph {
             }
         }
         None
+    }
+
+    fn draw_info(ui: &mut Ui, data_table: &InstrumentDataTable) {
+        ui.horizontal(|ui| {
+            ui.label(format!(
+                "Num. Samples: {}",
+                data_table.data.len().to_string()
+            ))
+        });
     }
 }

@@ -1,16 +1,23 @@
 use serde::{Deserialize, Serialize};
 
-pub const PHRASES_PER_CHAIN: usize = 16;
+pub const ROWS_PER_CHAIN: usize = 16;
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Clone, PartialEq, Serialize, Deserialize, Debug)]
+pub struct ChainRow {
+    pub phrase: Option<u32>,
+    pub transpose: f32,
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct Chain {
-    pub phrases: Vec<Option<u32>>,
+    #[serde(default)]
+    pub rows: Vec<ChainRow>,
 }
 
 impl Default for Chain {
     fn default() -> Self {
         Self {
-            phrases: vec![None; PHRASES_PER_CHAIN],
+            rows: vec![ChainRow::default(); ROWS_PER_CHAIN],
         }
     }
 }

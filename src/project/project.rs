@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, LinkedList};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 // todo: get rid of copy
 #[derive(Default, Copy, Clone, PartialEq)]
@@ -38,10 +39,6 @@ pub enum ProjectEvent {
         id: u32,
         new_preset: Option<Box<EffectPreset>>,
     },
-
-    // todo: allow UpdateInstrument to delete instruments like UpdateTrack can so a different event
-    // type isn't needed
-    DeleteInstrument(u32),
     UpdateSettings(ProjectSettings),
     CleanUnusedNotes,
 }
@@ -50,6 +47,9 @@ pub enum ProjectEvent {
 pub struct ProjectSettings {
     pub tempo: f32,
     pub transpose: i8,
+
+    #[serde(default)]
+    pub loop_player: bool,
 }
 
 impl Default for ProjectSettings {
@@ -57,6 +57,7 @@ impl Default for ProjectSettings {
         Self {
             tempo: 120.0,
             transpose: 0,
+            loop_player: false,
         }
     }
 }
@@ -126,17 +127,12 @@ impl Project {
                 ProjectEvent::UpdateTrack { index, new_track } => {
                     self.update_track(index, new_track);
                 }
-                ProjectEvent::UpdateChain {
-                    id: chain_id,
-                    new_chain,
-                } => self.update_chain(chain_id, *new_chain),
-                ProjectEvent::UpdatePhrase {
-                    id: phrase_id,
-                    new_phrase,
-                } => {
-                    if let Some(old_phrase) = self.phrases.get_mut(&phrase_id) {
-                        *old_phrase = *new_phrase;
-                    }
+                ProjectEvent::UpdateChain { id, new_chain } => self.update_chain(id, *new_chain),
+                ProjectEvent::UpdatePhrase { id, new_phrase } => {
+                    self.update_phrase(id, *new_phrase);
+                    //if let Some(old_phrase) = self.phrases.get_mut(&id) {
+                    //    *old_phrase = *new_phrase;
+                    //}
                 }
                 ProjectEvent::UpdateInstrument { id, new_instrument } => {
                     self.update_instrument(id, new_instrument)
@@ -144,9 +140,6 @@ impl Project {
                 ProjectEvent::UpdateSettings(settings) => self.settings = settings,
                 ProjectEvent::UpdateEffectPreset { id, new_preset } => {
                     self.update_effect_preset(id, new_preset);
-                }
-                ProjectEvent::DeleteInstrument(id) => {
-                    self.delete_instrument(id);
                 }
                 ProjectEvent::CleanUnusedNotes => {
                     self.clean_unused_notes();
@@ -190,12 +183,22 @@ impl Project {
             // if phrase is ever used, move on
             if self
                 .chains()
-                .iter()
-                .flat_map(|(_, chain)| &chain.phrases)
-                .any(|it| it.as_ref() == Some(phrase_id))
+                .values()
+                .any(|chain| chain.rows.iter().any(|row| row.phrase == Some(*phrase_id)))
             {
                 continue;
             }
+
+            // todo: delete this after verifying that the above works fine
+            //if self
+            //    .chains()
+            //    .values()
+            //    .map(|chain| chain.rows)
+            //    .flat_map(|row| &row.phrase)
+            //    .any(|it| it.as_ref() == Some(phrase_id))
+            //{
+            //    continue;
+            //}
 
             phrases_to_delete.push(*phrase_id);
         }
@@ -213,8 +216,8 @@ impl Project {
             .and_then(|track| track.chains.get(location.chain_offset).cloned())
             .flatten()
             .and_then(|chain_id| self.chains().get(&chain_id))
-            .and_then(|chain| chain.phrases.get(location.phrase_offset).cloned())
-            .flatten()
+            .and_then(|chain| chain.rows.get(location.phrase_offset).cloned())
+            .and_then(|row| row.phrase)
             .and_then(|phrase_id| self.phrases().get(&phrase_id))
             .and_then(|phrase| {
                 let notes = phrase
@@ -255,6 +258,7 @@ impl Project {
 
     pub fn update_track(&mut self, index: usize, new_track: Option<Box<Track>>) {
         let Some(new_track) = new_track else {
+            // removing track
             if index < self.tracks.len() {
                 self.tracks.remove(index);
             }
@@ -272,23 +276,15 @@ impl Project {
             }
         };
 
-        for new_chain in new_track.chains.iter().filter_map(|c| *c) {
-            self.chains.entry(new_chain).or_default();
-        }
-
         *track = *new_track;
     }
 
     pub fn update_chain(&mut self, chain_id: u32, new_chain: Chain) {
-        let Some(chain) = self.chains.get_mut(&chain_id) else {
-            return;
-        };
+        self.chains.insert(chain_id, new_chain);
+    }
 
-        for new_id in new_chain.phrases.iter().filter_map(|p| *p) {
-            self.phrases.entry(new_id).or_default();
-        }
-
-        *chain = new_chain;
+    pub fn update_phrase(&mut self, phrase_id: u32, new_phrase: Phrase) {
+        self.phrases.insert(phrase_id, new_phrase);
     }
 
     pub fn update_instrument(&mut self, id: u32, instrument: Option<Box<Instrument>>) {
@@ -305,15 +301,6 @@ impl Project {
         };
     }
 
-    pub fn delete_instrument(&mut self, id: u32) {
-        self.instruments.remove(&id);
-        self.tracks.iter_mut().for_each(|track| {
-            if Some(id) == track.settings.instrument {
-                track.settings.instrument = None;
-            }
-        });
-    }
-
     pub fn get_unique_key<T>(map: &BTreeMap<u32, T>) -> u32 {
         for (potential_key, key) in (0..).zip(map.keys()) {
             if potential_key != *key {
@@ -323,29 +310,79 @@ impl Project {
 
         map.keys().last().unwrap_or(&0) + 1
     }
+
+    pub fn get_nth_unique_key<T>(n: usize, map: &BTreeMap<u32, T>) -> u32 {
+        let mut countdown = n;
+
+        for potential_key in 0.. {
+            if !map.contains_key(&potential_key) {
+                if countdown == 0 {
+                    return potential_key;
+                } else {
+                    countdown -= 1;
+                }
+            }
+        }
+
+        // backup: should never reach here
+        map.keys().last().unwrap_or(&0) + 1 + n as u32
+    }
+
+    pub fn get_note_transpose_semitones(&self, location: ProjectLocation) -> Option<f32> {
+        // All the places that notes can be transposed:
+        // - project-wide
+        // - track
+        // - a phrase can be transposed inside a chain
+        // - an instrument??? (todo)
+
+        let project_trans = self.settings().transpose as f32;
+        let track = self
+            .tracks()
+            .get(location.track_idx)?
+            .settings
+            .transpose_semitones as f32;
+        let inside_chain = self
+            .tracks()
+            .get(location.track_idx)
+            .and_then(|track| track.chains.get(location.chain_offset).cloned())
+            .and_then(|chain_id_opt| chain_id_opt)
+            .and_then(|chain_id| self.chains().get(&chain_id))
+            .and_then(|chain| chain.rows.get(location.phrase_offset))
+            .map(|row| row.transpose)
+            .unwrap_or(0.0);
+
+        Some(project_trans + track + inside_chain)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::helpers;
+
     use super::*;
 
     #[test]
     fn frequency() {
         let mut note = Note::default();
+        macro_rules! freq {
+            ($note:ident) => {
+                helpers::frequency_from_semitone($note.semitone().unwrap() as f32)
+            };
+        }
 
         note.set_semitone(Some(57));
-        assert!((note.frequency() - 440.0).abs() < 0.1);
+        assert!((freq!(note) - 440.0).abs() < 0.1);
 
         note.set_semitone(Some(0));
-        assert!((note.frequency() - 16.35).abs() < 0.1);
+        assert!((freq!(note) - 16.35).abs() < 0.1);
 
         note.set_semitone(Some(69));
-        assert!((note.frequency() - 880.0).abs() < 0.1);
+        assert!((freq!(note) - 880.0).abs() < 0.1);
 
         note.set_semitone(Some(27));
-        assert!((note.frequency() - 77.78).abs() < 0.1);
+        assert!((freq!(note) - 77.78).abs() < 0.1);
 
         note.set_semitone(Some(107));
-        assert!((note.frequency() - 7902.13).abs() < 0.1);
+        assert!((freq!(note) - 7902.13).abs() < 0.1);
     }
 }

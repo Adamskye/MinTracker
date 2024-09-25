@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     error::Error,
     fs::File,
     path::PathBuf,
@@ -7,13 +8,13 @@ use std::{
 
 use chain_ui::ChainUI;
 use eframe::{
-    egui::{self, DragValue, Key, Separator, Slider, Ui, ViewportCommand},
-    App, Theme,
+    egui::{self, Button, Color32, DragValue, Key, Separator, Slider, Ui, ViewportCommand},
+    App,
 };
 use egui::{Align, Layout, Vec2};
 use instrument_ui::InstrumentUI;
 use phrase_ui::PhraseUI;
-use project::{Project, ProjectEvent, ProjectLocation, ProjectSettings, ROWS_PER_PHRASE};
+use project::{Project, ProjectEvent, ProjectSettings};
 use synth::{Player, PlayerCmd, ROProject};
 use track_ui::TrackUI;
 
@@ -286,6 +287,21 @@ impl MinTracker {
             if ui.small_button("⏹").clicked() {
                 self.state.player.send_command(PlayerCmd::Stop);
             }
+
+            let loop_button = Button::new("🔁").small();
+            if ui
+                .add(if settings.loop_player {
+                    loop_button.fill(Color32::LIGHT_BLUE)
+                } else {
+                    loop_button
+                })
+                .clicked()
+            {
+                proj.push_event(ProjectEvent::UpdateSettings(ProjectSettings {
+                    loop_player: !settings.loop_player,
+                    ..settings.clone()
+                }));
+            };
         });
 
         ui.add_sized([10.0, 10.0], Separator::default().horizontal());
@@ -433,7 +449,6 @@ impl MinTracker {
         self.project = Arc::new(RwLock::new(serde_cbor::from_reader(file)?));
         self.state.filepath = Some(path);
         self.state.project_dirty = false;
-
         Ok(())
     }
 

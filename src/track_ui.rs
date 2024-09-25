@@ -6,6 +6,7 @@ use eframe::{
     },
     epaint::{Color32, Stroke},
 };
+use itertools::Itertools;
 
 use std::sync::mpsc;
 
@@ -441,6 +442,16 @@ impl TrackUI {
             if ui.button("Rename Chain").clicked() {
                 ui.close_menu();
             }
+
+            if ui.button("Shallow Clone").clicked() {
+                ui.close_menu();
+                Self::shallow_clone(chain, project);
+            }
+
+            if ui.button("Deep Clone").clicked() {
+                ui.close_menu();
+                Self::deep_clone(chain, project);
+            }
         });
     }
 
@@ -583,5 +594,74 @@ impl TrackUI {
                 new_track: None,
             })
         }
+    }
+
+    fn shallow_clone(old_chain_id: &mut Option<u32>, project: &Project) {
+        // get the chain
+        let Some(old_chain_id) = old_chain_id else {
+            return;
+        };
+
+        let Some(chain) = project.chains().get(&old_chain_id) else {
+            return;
+        };
+
+        // clone the thing
+        let new_chain = Box::new(chain.clone());
+        let id = Project::get_unique_key(project.chains());
+        project.push_event(ProjectEvent::UpdateChain { id, new_chain });
+
+        // put the cloned thing there
+        *old_chain_id = id;
+    }
+
+    fn deep_clone(old_chain_id_opt: &mut Option<u32>, project: &Project) {
+        // get the chain
+        let Some(old_chain_id) = old_chain_id_opt else {
+            return;
+        };
+
+        // shallow clone the chain
+        let Some(mut new_chain) = project.chains().get(&old_chain_id).cloned() else {
+            return;
+        };
+
+        // clone all the phrases inside the chain
+        new_chain
+            .rows
+            .iter()
+            .filter_map(|row| row.phrase)
+            .sorted()
+            .dedup()
+            .enumerate()
+            .for_each(|(n, unique_id)| {
+                let new_id = Project::get_nth_unique_key(n, project.phrases());
+                let new_phrase = project
+                    .phrases()
+                    .get(&unique_id)
+                    .cloned()
+                    .map(Box::new)
+                    .unwrap_or_default();
+
+                project.push_event(ProjectEvent::UpdatePhrase {
+                    id: new_id,
+                    new_phrase,
+                });
+
+                new_chain
+                    .rows
+                    .iter_mut()
+                    .filter(|row| row.phrase == Some(unique_id))
+                    .for_each(|row| row.phrase = Some(new_id));
+            });
+
+        // add the chain
+        let new_chain_id = Project::get_unique_key(project.chains());
+        project.push_event(ProjectEvent::UpdateChain {
+            id: new_chain_id,
+            new_chain: Box::new(new_chain),
+        });
+
+        *old_chain_id_opt = Some(new_chain_id);
     }
 }

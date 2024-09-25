@@ -99,7 +99,7 @@ impl Player {
         let mut i: i64 = -1;
 
         let mut last_note_time = Instant::now();
-        let mut project_settings = Arc::new(project.read().unwrap().settings().clone());
+        let mut project_settings = project.read().unwrap().settings().clone();
 
         // if a position within a track is `None`, then the track is finished
         let mut current_pos = start
@@ -134,10 +134,10 @@ impl Player {
             }
 
             // update project settings
-            if *project.read().unwrap().settings() != *project_settings {
-                project_settings = Arc::new(project.read().unwrap().settings().clone());
+            if *project.read().unwrap().settings() != project_settings {
+                project_settings = project.read().unwrap().settings().clone();
                 note_pool.send_message_to_all(OscillatorMsg::SetProjectSettings(
-                    project_settings.clone(),
+                    project.read().unwrap().settings().clone(),
                 ));
             }
 
@@ -169,62 +169,31 @@ impl Player {
 
                 all_tracks_finished = false;
 
-                if Some(*track_location) == end {
-                    to_end = true;
+                for voice_idx in 0..VOICES_PER_TRACK {
+                    note_pool.play_note(voice_idx, &project, &track_location);
                 }
 
-                let Some(notes) = project.get_notes_at_location(*track_location) else {
-                    *track_location_opt = None;
-                    continue;
+                let new_location_opt = project.increment_project_location(*track_location);
+                match new_location_opt {
+                    Some(new_location) if Some(*track_location) != end => {
+                        *track_location = new_location
+                    }
+                    _ => {
+                        *track_location_opt = None;
+                    }
                 };
-
-                Self::play_voices(
-                    &project,
-                    project_settings.clone(),
-                    track_location.track_idx,
-                    notes,
-                    &note_pool,
-                );
-
-                if let Some(new_location) = project.increment_project_location(*track_location) {
-                    *track_location = new_location;
-                } else {
-                    *track_location_opt = None;
-                }
             }
 
-            if all_tracks_finished {
+            if all_tracks_finished && !project_settings.loop_player {
                 to_end = true;
+            } else if all_tracks_finished && project_settings.loop_player {
+                current_pos
+                    .iter_mut()
+                    .zip(start.iter())
+                    .for_each(|(current_pos, start_pos)| *current_pos = Some(*start_pos));
+            } else {
+                last_note_time = Instant::now();
             }
-            last_note_time = Instant::now();
-        }
-    }
-
-    fn play_voices(
-        project: &Project,
-        project_settings: Arc<ProjectSettings>,
-        track_idx: usize,
-        notes: Arc<[&Note]>,
-        note_pool: &NotePool,
-    ) {
-        for (voice_idx, note) in notes.iter().enumerate() {
-            let Some(track) = project.tracks().get(track_idx) else {
-                continue;
-            };
-
-            let instrument = track
-                .settings
-                .instrument
-                .and_then(|inst_id| project.instruments().get(&inst_id));
-
-            note_pool.play_note(
-                (*note).clone(),
-                track_idx,
-                voice_idx,
-                instrument,
-                project_settings.clone(),
-                track.settings.clone(),
-            );
         }
     }
 }
@@ -248,23 +217,37 @@ impl Default for NotePool {
 }
 
 impl NotePool {
-    pub fn play_note(
-        &self,
-        mut note: Note,
-        track: usize,
-        voice: usize,
-        instrument: Option<&Instrument>,
-        project_settings: Arc<ProjectSettings>,
-        track_settings: TrackSettings,
-    ) {
+    pub fn play_note(&self, voice: usize, project: &Project, location: &ProjectLocation) {
         if voice >= VOICES_PER_TRACK {
             return;
         }
 
-        let (Some(semitone), Some(instrument)) = (note.semitone(), instrument) else {
+        // fetch copy of note
+        let Some(mut note) = project
+            .get_notes_at_location(*location)
+            .and_then(|notes| notes.get(voice).map(|note| (*note).clone()))
+        else {
+            return;
+        };
+
+        // fetch reference to track
+        let Some(track) = project.tracks().get(location.track_idx) else {
+            return;
+        };
+
+        let instrument_opt = track
+            .settings
+            .instrument
+            .and_then(|inst_id| project.instruments().get(&inst_id));
+
+        let (Some(semitone), Some(instrument)) = (note.semitone(), instrument_opt) else {
             // if note does not have an assigned semitone but does have effects
             if note.has_effects() {
-                self.send_message(track, voice, OscillatorMsg::AddEffects(note.effects));
+                self.send_message(
+                    location.track_idx,
+                    voice,
+                    OscillatorMsg::AddEffects(note.effects),
+                );
             }
             return;
         };
@@ -278,22 +261,22 @@ impl NotePool {
             slide_effect.end_semitone = semitone_opt;
 
             // start semitone
-            self.send_message(track, voice, OscillatorMsg::GetFrequency(tx));
+            self.send_message(location.track_idx, voice, OscillatorMsg::GetFrequency(tx));
             slide_effect.start_semitone = rx
                 .recv()
                 .ok()
                 .map(|freq| helpers::semitone_from_frequency(freq));
         }
 
+        // access tracklist and resize if needed
         let mut tracklist = self.tracklist.borrow_mut();
-        if tracklist.len() <= track {
-            tracklist.resize_with(track + 1, Default::default);
+        if tracklist.len() <= location.track_idx {
+            tracklist.resize_with(location.track_idx + 1, Default::default);
         }
 
         let Some(data_table) = instrument
             .data_table_map
             .get(semitone as usize)
-            //.get((semitone.saturating_add_signed(-project_settings.transpose)) as usize)
             .cloned()
             .flatten()
             .and_then(|index| instrument.data_tables.get(index))
@@ -306,8 +289,9 @@ impl NotePool {
             data_table,
             helpers::frequency_from_semitone(
                 semitone as f32
-                    + project_settings.transpose as f32
-                    + track_settings.transpose_semitones,
+                    + project
+                        .get_note_transpose_semitones(*location)
+                        .unwrap_or(0.0),
             ),
         );
         let wo = wo.stoppable().amplify(0.2);
@@ -317,12 +301,14 @@ impl NotePool {
         }) else {
             return;
         };
-        tracklist[track][voice] = Some(tx);
+        tracklist[location.track_idx][voice] = Some(tx);
 
-        if let Some(tx) = &tracklist[track][voice] {
+        if let Some(tx) = &tracklist[location.track_idx][voice] {
             let _ = tx.send(OscillatorMsg::AddEffects(note.effects));
-            let _ = tx.send(OscillatorMsg::SetProjectSettings(project_settings.clone()));
-            let _ = tx.send(OscillatorMsg::SetTrackSettings(track_settings));
+            let _ = tx.send(OscillatorMsg::SetProjectSettings(
+                project.settings().clone(),
+            ));
+            let _ = tx.send(OscillatorMsg::SetTrackSettings(track.settings.clone()));
         }
 
         sink.play();
@@ -367,7 +353,7 @@ impl NotePool {
 pub enum OscillatorMsg {
     AddEffects(NoteEffects),
     GetFrequency(Sender<f32>),
-    SetProjectSettings(Arc<ProjectSettings>),
+    SetProjectSettings(ProjectSettings),
     SetTrackSettings(TrackSettings),
 }
 
@@ -384,7 +370,7 @@ pub struct WavetableOscillator {
     /// envelope volume modifier for the right ear (which would be the same as the left ear)
     prev_env_vol: f32,
 
-    project_settings: Arc<ProjectSettings>,
+    project_settings: ProjectSettings,
     track_settings: TrackSettings,
 
     /// receives messages, such as to add effects, set the project settings or pan
@@ -401,6 +387,8 @@ pub struct WavetableOscillator {
     vibrato_counter: u64,
     /// sample counter that starts when kill effect begins
     kill_counter: u64,
+    /// sample counter that starts when soft kill effect begins
+    soft_kill_counter: u64,
     /// sample counter that starts when pitch bend begins
     pitch_bend_counter: u64,
     /// sample counter that starts when slide effect begins
@@ -427,6 +415,7 @@ impl WavetableOscillator {
                 effects: NoteEffects::default(),
                 vibrato_counter: 0,
                 kill_counter: 0,
+                soft_kill_counter: 0,
                 pitch_bend_counter: 0,
                 slide_counter: 0,
 
@@ -622,12 +611,12 @@ impl WavetableOscillator {
 
     fn should_activate_kill_effect(&mut self) -> bool {
         if let Some(kill_effect) = &mut self.effects.kill {
-            let kill_num_samples =
+            let duration_in_samples =
                 helpers::ticks_to_duration(kill_effect.delay_ticks, self.project_settings.tempo)
                     .as_secs_f32()
                     * SAMPLE_RATE as f32;
 
-            if self.kill_counter > kill_num_samples as u64 {
+            if self.kill_counter > duration_in_samples as u64 {
                 return true;
             }
 
@@ -636,6 +625,30 @@ impl WavetableOscillator {
             }
         }
         return false;
+    }
+
+    fn handle_soft_kill_effect(&mut self) {
+        if self.time_when_stopped.is_some() {
+            return;
+        }
+
+        if let Some(soft_kill_effect) = &mut self.effects.soft_kill {
+            let duration_in_samples = helpers::ticks_to_duration(
+                soft_kill_effect.delay_ticks,
+                self.project_settings.tempo,
+            )
+            .as_secs_f32()
+                * SAMPLE_RATE as f32;
+
+            if self.soft_kill_counter > duration_in_samples as u64 {
+                self.time_when_stopped = Some(Self::sample_counter_to_ms(self.counter));
+                return;
+            }
+
+            if self.should_fetch_new_sample() {
+                self.soft_kill_counter = self.soft_kill_counter.saturating_add(1);
+            }
+        }
     }
 }
 
@@ -654,6 +667,8 @@ impl Iterator for WavetableOscillator {
         if self.should_activate_kill_effect() {
             return None;
         }
+
+        self.handle_soft_kill_effect();
 
         // getting volume modifier
         let env_vol = self.get_envelope_modifier()?;

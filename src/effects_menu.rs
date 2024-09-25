@@ -5,7 +5,7 @@ use eframe::egui::{Align, Button, DragValue, Layout, Separator, Ui};
 use crate::{
     project::{
         EffectPreset, EnvelopeEffect, KillEffect, NoteEffects, PanEffect, PitchBendEffect, Project,
-        ProjectEvent, SlideEffect, VibratoEffect,
+        ProjectEvent, SlideEffect, SoftKillEffect, VibratoEffect,
     },
     widget,
 };
@@ -16,6 +16,7 @@ pub enum EffectMenuSelected {
     None,
     Vibrato,
     Kill,
+    SoftKill,
     PitchBend,
     Slide,
     Envelope,
@@ -83,6 +84,7 @@ impl EffectsMenu {
         use EffectMenuSelected as ems;
         effect_option!(effects.vibrato, ems::Vibrato, "Vibrato");
         effect_option!(effects.kill, ems::Kill, "Kill");
+        effect_option!(effects.soft_kill, ems::SoftKill, "Soft Kill");
         effect_option!(effects.pitch_bend, ems::PitchBend, "Pitch Bend");
         effect_option!(effects.slide, ems::Slide, "Slide");
         effect_option!(effects.envelope, ems::Envelope, "Envelope");
@@ -90,13 +92,31 @@ impl EffectsMenu {
     }
 
     fn effect_presets(&mut self, ui: &mut Ui, effects: &mut NoteEffects, project: &Project) {
+        if project.effect_presets().is_empty() {
+            return;
+        }
+
+        let mut to_delete_key = None;
+
         let _ = ui.menu_button("Preset", |ui| {
             project.effect_presets().iter().for_each(|(key, preset)| {
-                if ui.button(format!("{} - {}", key, preset.name)).clicked() {
-                    effects.add_from_other(&preset.effects);
-                }
+                ui.horizontal_centered(|ui| {
+                    if ui.small_button("❌").clicked() {
+                        to_delete_key = Some(key);
+                    }
+                    if ui.button(format!("{} - {}", key, preset.name)).clicked() {
+                        effects.add_from_other(&preset.effects);
+                    }
+                });
             });
         });
+
+        if let Some(key) = to_delete_key {
+            project.push_event(ProjectEvent::UpdateEffectPreset {
+                id: *key,
+                new_preset: None,
+            });
+        }
     }
 
     fn effect_adder(&mut self, ui: &mut Ui, effects: &mut NoteEffects) {
@@ -111,6 +131,7 @@ impl EffectsMenu {
         let _ = ui.menu_button("Add Effect", |ui| {
             add_effect_option!(ui, effects.vibrato, "Vibrato");
             add_effect_option!(ui, effects.kill, "Kill");
+            add_effect_option!(ui, effects.soft_kill, "Soft Kill");
             add_effect_option!(ui, effects.pitch_bend, "Pitch Bend");
             add_effect_option!(ui, effects.slide, "Slide");
             add_effect_option!(ui, effects.envelope, "Envelope");
@@ -139,6 +160,9 @@ impl EffectsMenu {
                 ems::Kill => {
                     show_effects_page!(ui, effects.kill, self, kill_page);
                 }
+                ems::SoftKill => {
+                    show_effects_page!(ui, effects.soft_kill, self, soft_kill_page);
+                }
                 ems::PitchBend => {
                     show_effects_page!(ui, effects.pitch_bend, self, pitch_bend_page);
                 }
@@ -165,6 +189,7 @@ impl EffectsMenu {
             ems::None => return,
             ems::Vibrato => effects.vibrato = None,
             ems::Kill => effects.kill = None,
+            ems::SoftKill => effects.soft_kill = None,
             ems::PitchBend => effects.pitch_bend = None,
             ems::Slide => effects.slide = None,
             ems::Envelope => effects.envelope = None,
@@ -193,6 +218,13 @@ impl EffectsMenu {
         ui.horizontal(|ui| {
             ui.label("Delay (ticks)");
             ui.add(DragValue::new(&mut kill_effect.delay_ticks).range(0.0..=f32::INFINITY));
+        });
+    }
+
+    fn soft_kill_page(&mut self, ui: &mut Ui, soft_kill_effect: &mut SoftKillEffect) {
+        ui.horizontal(|ui| {
+            ui.label("Delay (ticks)");
+            ui.add(DragValue::new(&mut soft_kill_effect.delay_ticks).range(0.0..=f32::INFINITY));
         });
     }
 

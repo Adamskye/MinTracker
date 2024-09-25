@@ -102,40 +102,7 @@ impl Page for PhraseUI {
     }
 
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        let Some(chain) = state
-            .viewed_chain
-            .and_then(|chain_id| project.chains().get(&chain_id))
-        else {
-            return;
-        };
-
-        let Some(current_row) = state.chain_selected_row else {
-            return;
-        };
-
-        if ui.small_button("Up").clicked() {
-            for i in (0..current_row).rev() {
-                let Some(phrase_id) = chain.phrases.get(i) else {
-                    continue;
-                };
-
-                state.chain_selected_row = Some(i);
-                state.viewed_phrase = *phrase_id;
-                break;
-            }
-        }
-
-        if ui.small_button("Down").clicked() {
-            for i in (current_row + 1)..chain.phrases.len() {
-                let Some(Some(phrase_id)) = chain.phrases.get(i) else {
-                    continue;
-                };
-
-                state.chain_selected_row = Some(i);
-                state.viewed_phrase = Some(*phrase_id);
-                break;
-            }
-        }
+        self.up_down_side_buttons(ui, state, project);
 
         ui.add_sized([40.0, 20.0], egui::Separator::default().horizontal());
 
@@ -409,6 +376,43 @@ impl PhraseUI {
             let new_semitone = semitone.saturating_add(amount);
             *last_note_semitone = new_semitone;
             note.set_semitone(Some(new_semitone));
+        }
+    }
+
+    fn up_down_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
+        let Some(chain) = state
+            .viewed_chain
+            .and_then(|chain_id| project.chains().get(&chain_id))
+        else {
+            return;
+        };
+
+        let Some(current_row) = state.chain_selected_row else {
+            return;
+        };
+
+        if ui.small_button("⬆").clicked() {
+            for i in (0..current_row).rev() {
+                let Some(phrase_id) = chain.rows.get(i).and_then(|row| row.phrase) else {
+                    continue;
+                };
+
+                state.chain_selected_row = Some(i);
+                state.viewed_phrase = Some(phrase_id);
+                break;
+            }
+        }
+
+        if ui.small_button("⬇").clicked() {
+            for i in (current_row + 1)..chain.rows.len() {
+                let Some(phrase_id) = chain.rows.get(i).and_then(|row| row.phrase) else {
+                    continue;
+                };
+
+                state.chain_selected_row = Some(i);
+                state.viewed_phrase = Some(phrase_id);
+                break;
+            }
         }
     }
 

@@ -3,19 +3,19 @@ use std::sync::mpsc;
 use eframe::{
     egui::{
         util::undoer::{Settings, Undoer},
-        Button, Grid, Key, Response, RichText, ScrollArea, Sense, Ui,
+        Button, DragValue, Frame, Grid, Key, Response, RichText, ScrollArea, Sense, Separator, Ui,
     },
     epaint::{Color32, Stroke},
 };
 
 use crate::{
-    project::{Chain, Project, ProjectEvent, ProjectLocation, ROWS_PER_PHRASE},
+    project::{Chain, ChainRow, Project, ProjectEvent, ProjectLocation, ROWS_PER_PHRASE},
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, ROProject},
     AppUIState, Page, PageID,
 };
 
-type Clipboard = Vec<Option<u32>>;
+type Clipboard = Vec<ChainRow>;
 
 #[derive(Default, PartialEq)]
 enum Tool {
@@ -88,6 +88,10 @@ impl Page for ChainUI {
             }
         }
 
+        self.up_down_side_buttons(ui, state, project);
+        ui.add_sized([40.0, 20.0], Separator::default().horizontal());
+
+        // tool select
         let selection = if let Tool::Select(selection) = self.tool {
             selection
         } else {
@@ -127,12 +131,11 @@ impl Page for ChainUI {
             .and_then(|track| track.chains.get(chain_offset))
             .and_then(|chain_id_opt| *chain_id_opt)
             .and_then(|chain_id| project_read.chains().get(&chain_id))
-            .map(|chain| &chain.phrases)
-            .map(|phrase_list| {
-                phrase_list
-                    .iter()
-                    .position(|phrase_opt| phrase_opt.is_none())
-                    .unwrap_or(phrase_list.len())
+            .map(|chain| &chain.rows)
+            .map(|rows| {
+                rows.iter()
+                    .position(|row| row.phrase.is_none())
+                    .unwrap_or(rows.len())
             })
         else {
             return;
@@ -174,28 +177,6 @@ impl ChainUI {
         } else if ui.input(|i| i.key_pressed(Key::S)) {
             *tool = Tool::Select(None);
         }
-
-        //if let Tool::SelectOld { event, .. } = tool {
-        //    if ui.input(|i| i.key_pressed(Key::Delete)) {
-        //        *event = SelectionEvent::Delete;
-        //    }
-
-        //    // relevant: https://github.com/emilk/egui/issues/4065
-        //    ui.input(|i| {
-        //        i.events.iter().for_each(|ev| match ev {
-        //            Event::Copy => {
-        //                *event = SelectionEvent::Copy;
-        //            }
-        //            Event::Paste(_) => {
-        //                *event = SelectionEvent::Paste;
-        //            }
-        //            Event::Cut => {
-        //                *event = SelectionEvent::Cut;
-        //            }
-        //            _ => (),
-        //        })
-        //    });
-        //}
     }
 
     fn show_phrase_list(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
@@ -203,70 +184,126 @@ impl ChainUI {
         state.player.send_command(PlayerCmd::RequestLocation(tx));
         let position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
 
-        for row in 0..self.local_state.chain.phrases.len() {
-            // playing position indicator
-            let is_playing = position_opt
-                .as_ref()
-                .and_then(|position| {
-                    position.iter().filter_map(|it_opt| *it_opt).find(|it| {
-                        Some(it.track_idx) == state.viewed_track
-                            && Some(it.chain_offset) == state.track_selected_row
-                            && it.phrase_offset == row
-                    })
-                })
-                .is_some();
+        Grid::new("chain_ui_phrase_grid")
+            .num_columns(3)
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("");
+                ui.label("Phrases");
+                ui.label("Transpose");
+                ui.end_row();
 
-            let pos_indicator = RichText::new(">").color(if is_playing {
-                Color32::RED
-            } else {
-                Color32::TRANSPARENT
+                for row in 0..self.local_state.chain.rows.len() {
+                    Self::position_indicator(ui, &position_opt, state, row);
+                    let btn_response = self.phrase_button_no_interaction(ui, row);
+                    self.transpose(ui, row);
+
+                    ui.end_row();
+
+                    let Some(btn_response) = btn_response else {
+                        continue;
+                    };
+                    match &mut self.tool {
+                        Tool::Edit => Self::phrase_button_interaction(
+                            ui,
+                            &mut self.local_state,
+                            state,
+                            project,
+                            btn_response,
+                            row,
+                        ),
+                        Tool::Select(selection) => {
+                            selection::handle_widget_selecting(
+                                ui,
+                                selection,
+                                &btn_response,
+                                row,
+                                0,
+                            );
+                            self.selection_context_menu(&btn_response, row);
+                        }
+                    };
+                }
             });
-
-            // phrase
-            let phrase = &self.local_state.chain.phrases[row];
-            let label = match phrase {
-                Some(p) => p.to_string(),
-                None => "-".to_string(),
-            };
-
-            let selected = if let Tool::Select(selection) = &self.tool {
-                selection::widget_in_selection(selection, row, 0)
-            } else {
-                false
-            };
-
-            let btn = if selected {
-                Button::new(label).stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
-            } else {
-                Button::new(label)
-            }
-            .rounding(0.0)
-            .fill(Color32::TRANSPARENT)
-            .sense(Sense::click_and_drag());
-
-            ui.horizontal(|ui| {
-                ui.label(pos_indicator);
-                let response = ui.add_sized([40.0, 20.0], btn);
-
-                match &mut self.tool {
-                    Tool::Edit => Self::handle_button_interaction(
-                        ui,
-                        &mut self.local_state,
-                        state,
-                        project,
-                        response,
-                        row,
-                    ),
-                    Tool::Select(selection) => {
-                        selection::handle_widget_selecting(ui, selection, &response, row, 0);
-                        self.selection_context_menu(&response, row);
-                    }
-                };
-            });
-        }
     }
 
-    fn handle_button_interaction(
+    fn position_indicator(
+        ui: &mut Ui,
+        position_opt: &Option<Vec<Option<ProjectLocation>>>,
+        state: &AppUIState,
+        row: usize,
+    ) {
+        let is_playing = position_opt
+            .as_ref()
+            .and_then(|position| {
+                position.iter().filter_map(|it_opt| *it_opt).find(|it| {
+                    Some(it.track_idx) == state.viewed_track
+                        && Some(it.chain_offset) == state.track_selected_row
+                        && it.phrase_offset == row
+                })
+            })
+            .is_some();
+
+        let pos_indicator = RichText::new(">").color(if is_playing {
+            Color32::RED
+        } else {
+            Color32::TRANSPARENT
+        });
+
+        ui.label(pos_indicator);
+    }
+
+    fn phrase_button_no_interaction(&self, ui: &mut Ui, row: usize) -> Option<Response> {
+        let phrase = self.local_state.chain.rows.get(row).map(|row| row.phrase)?;
+
+        let label = match phrase {
+            Some(p) => p.to_string(),
+            None => "-".to_string(),
+        };
+
+        let selected = if let Tool::Select(selection) = &self.tool {
+            selection::widget_in_selection(selection, row, 0)
+        } else {
+            false
+        };
+
+        let btn = if selected {
+            Button::new(label).stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
+        } else {
+            Button::new(label)
+        }
+        .rounding(0.0)
+        .fill(Color32::TRANSPARENT)
+        .sense(Sense::click_and_drag());
+
+        Some(ui.add_sized([40.0, 20.0], btn))
+    }
+
+    fn transpose(&mut self, ui: &mut Ui, row: usize) {
+        let Some(chain_row) = self.local_state.chain.rows.get_mut(row) else {
+            return;
+        };
+
+        let selected = if let Tool::Select(selection) = &self.tool {
+            selection::widget_in_selection(selection, row, 0)
+        } else {
+            false
+        };
+
+        if selected {
+            Frame::none().stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
+        } else {
+            Frame::none()
+        }
+        .show(ui, |ui| {
+            ui.add_sized(
+                [40.0, 20.0],
+                DragValue::new(&mut chain_row.transpose).speed(1.0),
+            );
+        });
+    }
+
+    fn phrase_button_interaction(
         ui: &mut Ui,
         s: &mut ChainUIState,
         state: &mut AppUIState,
@@ -275,7 +312,7 @@ impl ChainUI {
         row: usize,
     ) {
         {
-            let Some(phrase) = s.chain.phrases.get_mut(row) else {
+            let Some(phrase) = s.chain.rows.get_mut(row).map(|row| &mut row.phrase) else {
                 return;
             };
 
@@ -295,7 +332,12 @@ impl ChainUI {
             return;
         }
 
-        let Some(Some(phrase)) = s.chain.phrases.get_mut(row) else {
+        let Some(phrase) = s
+            .chain
+            .rows
+            .get_mut(row)
+            .and_then(|row| row.phrase.as_mut())
+        else {
             return;
         };
 
@@ -325,7 +367,12 @@ impl ChainUI {
         row: usize,
     ) {
         response.context_menu(|ui| {
-            let Some(phrase) = s.chain.phrases.get_mut(row) else {
+            let Some(phrase) = s
+                .chain
+                .rows
+                .get_mut(row)
+                .map(|chain_row| &mut chain_row.phrase)
+            else {
                 return;
             };
 
@@ -337,6 +384,11 @@ impl ChainUI {
             if ui.button("Delete").clicked() {
                 ui.close_menu();
                 *phrase = None;
+            }
+
+            if ui.button("Clone").clicked() {
+                ui.close_menu();
+                Self::clone_phrase(phrase, project);
             }
         });
     }
@@ -381,30 +433,87 @@ impl ChainUI {
         });
     }
 
+    fn up_down_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
+        let Some(current_row) = state.track_selected_row else {
+            return;
+        };
+
+        let Some(track) = state
+            .viewed_track
+            .and_then(|track_idx| project.tracks().get(track_idx))
+        else {
+            return;
+        };
+
+        if ui.small_button("⬆").clicked() {
+            for i in (0..current_row).rev() {
+                let Some(chain_id) = track.chains.get(i) else {
+                    continue;
+                };
+
+                state.track_selected_row = Some(i);
+                state.viewed_chain = *chain_id;
+                break;
+            }
+        }
+
+        if ui.small_button("⬇").clicked() {
+            for i in (current_row + 1)..track.chains.len() {
+                let Some(Some(chain_id)) = track.chains.get(i) else {
+                    continue;
+                };
+
+                state.track_selected_row = Some(i);
+                state.viewed_chain = Some(*chain_id);
+                break;
+            }
+        }
+    }
+
     fn delete_selection(chain: &mut Chain, row1: usize, row2: usize) {
-        for phrase in chain
-            .phrases
+        for row in chain
+            .rows
             .iter_mut()
             .take(row1.max(row2) + 1)
             .skip(row1.min(row2))
         {
-            *phrase = None;
+            *row = ChainRow::default();
         }
     }
 
     fn copy_selection(chain: &mut Chain, clipboard: &mut Clipboard, row1: usize, row2: usize) {
         *clipboard = chain
-            .phrases
+            .rows
             .iter()
             .cloned()
             .take(row1.max(row2) + 1)
             .skip(row1.min(row2))
-            .collect::<Vec<Option<u32>>>();
+            .collect::<Clipboard>();
     }
 
     fn paste_selection(chain: &mut Chain, clipboard: &Clipboard, row: usize) {
-        for (proj_phrase, clipboard_phrase) in chain.phrases.iter_mut().skip(row).zip(clipboard) {
-            *proj_phrase = *clipboard_phrase;
+        for (proj_row, clipboard_row) in chain.rows.iter_mut().skip(row).zip(clipboard) {
+            *proj_row = clipboard_row.clone();
         }
+    }
+
+    fn clone_phrase(phrase_id_opt: &mut Option<u32>, project: &Project) {
+        let Some(new_phrase) = phrase_id_opt
+            .and_then(|phrase_id| project.phrases().get(&phrase_id))
+            .cloned()
+            .map(Box::new)
+        else {
+            return;
+        };
+
+        let id = Project::get_unique_key(project.phrases());
+        project.push_event(ProjectEvent::UpdatePhrase { id, new_phrase });
+        *phrase_id_opt = Some(id);
+
+        //let Some(phrase_id) = phrase_id_opt else {
+        //    return;
+        //};
+
+        //let phrase =
     }
 }
