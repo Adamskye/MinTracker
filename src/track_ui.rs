@@ -11,7 +11,7 @@ use itertools::Itertools;
 use std::sync::mpsc;
 
 use crate::{
-    project::{Project, ProjectLocation, Track, CHAINS_PER_TRACK},
+    project::{Chain, Project, ProjectLocation, Track, CHAINS_PER_TRACK},
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, ROProject},
     AppUIState, Page, PageID, ProjectEvent,
@@ -433,7 +433,12 @@ impl TrackUI {
         response.context_menu(|ui| {
             if ui.button("Create Chain").clicked() {
                 ui.close_menu();
-                *chain = Some(Project::get_unique_key(project.chains()));
+                let id = Project::get_unique_key(project.chains());
+                project.push_event(ProjectEvent::UpdateChain {
+                    id,
+                    new_chain: Default::default(),
+                });
+                *chain = Some(id);
             }
             if ui.button("Delete Chain").clicked() {
                 ui.close_menu();

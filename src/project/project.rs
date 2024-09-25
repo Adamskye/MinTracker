@@ -302,13 +302,17 @@ impl Project {
     }
 
     pub fn get_unique_key<T>(map: &BTreeMap<u32, T>) -> u32 {
-        for (potential_key, key) in (0..).zip(map.keys()) {
-            if potential_key != *key {
+        for potential_key in 0.. {
+            if !map.contains_key(&potential_key) {
                 return potential_key;
             }
         }
 
-        map.keys().last().unwrap_or(&0) + 1
+        // backup: should never reach here
+        match map.keys().last() {
+            Some(last_key) => last_key + 1,
+            None => 0,
+        }
     }
 
     pub fn get_nth_unique_key<T>(n: usize, map: &BTreeMap<u32, T>) -> u32 {

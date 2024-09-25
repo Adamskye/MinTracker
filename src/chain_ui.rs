@@ -376,9 +376,14 @@ impl ChainUI {
                 return;
             };
 
-            if ui.button("Create").clicked() {
+            if ui.button("Create Phrase").clicked() {
                 ui.close_menu();
-                *phrase = Some(Project::get_unique_key(project.phrases()));
+                let id = Project::get_unique_key(project.phrases());
+                project.push_event(ProjectEvent::UpdatePhrase {
+                    id,
+                    new_phrase: Default::default(),
+                });
+                *phrase = Some(id);
             }
 
             if ui.button("Delete").clicked() {
