@@ -8,7 +8,7 @@ use std::{
 
 use chain_ui::ChainUI;
 use eframe::{
-    egui::{self, Button, Color32, DragValue, Key, Separator, Slider, Ui, ViewportCommand},
+    egui::{self, Button, Color32, DragValue, Key, Separator, Slider, Stroke, Ui, ViewportCommand},
     App,
 };
 use egui::{Align, Layout, Vec2};
@@ -224,7 +224,7 @@ impl MinTracker {
     fn sidepanel(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.with_layout(Layout::top_down(Align::Min), |ui| self.button_panel(ui));
-            ui.with_layout(Layout::bottom_up(Align::Min), |ui| self.map_panel(ui));
+            ui.with_layout(Layout::bottom_up(Align::Min), |ui| self.pages_panel(ui));
         });
     }
 
@@ -313,19 +313,16 @@ impl MinTracker {
         );
     }
 
-    fn map_panel(&mut self, ui: &mut Ui) {
-        if ui.button("Instrument").clicked() {
-            self.state.current_page = PageID::Instrument;
+    fn pages_panel(&mut self, ui: &mut Ui) {
+        macro_rules! page_button {
+            ($label:literal,$page_id:expr) => {
+                ui.selectable_value(&mut self.state.current_page, $page_id, $label);
+            };
         }
-        if ui.button("Phrase").clicked() {
-            self.state.current_page = PageID::Phrase;
-        }
-        if ui.button("Chain").clicked() {
-            self.state.current_page = PageID::Chain;
-        }
-        if ui.button("Project").clicked() {
-            self.state.current_page = PageID::Track;
-        }
+        page_button!("Instrument", PageID::Instrument);
+        page_button!("Phrase", PageID::Phrase);
+        page_button!("Chain", PageID::Chain);
+        page_button!("Tracks", PageID::Track);
     }
 
     fn update_page(&mut self, ui: &mut Ui) {
