@@ -13,7 +13,7 @@ use std::sync::mpsc;
 use crate::{
     project::{Chain, Project, ProjectLocation, Track, CHAINS_PER_TRACK},
     selection::{self, SelectionCoords},
-    synth::{PlayerCmd, ROProject},
+    synth::{PlayerCmd, PlayerScope, ROProject},
     AppUIState, Page, PageID, ProjectEvent,
 };
 
@@ -105,16 +105,19 @@ impl Page for TrackUI {
             _ => 0,
         };
 
-        let start_locations = (0..project.read().unwrap().tracks().len())
-            .map(|i| ProjectLocation {
-                track_idx: i,
-                chain_offset,
-                phrase_offset: 0,
-                note_offset: 0,
-            })
-            .collect();
+        let scope = PlayerScope {
+            first_notes: (0..project.read().unwrap().tracks().len())
+                .map(|i| ProjectLocation {
+                    track_idx: i,
+                    chain_offset,
+                    phrase_offset: 0,
+                    note_offset: 0,
+                })
+                .collect(),
+            last_note: None,
+        };
 
-        state.player.play(project, start_locations, None);
+        state.player.play(project, scope);
     }
 }
 

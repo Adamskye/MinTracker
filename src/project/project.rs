@@ -6,7 +6,6 @@ use std::collections::{BTreeMap, LinkedList};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 // todo: get rid of copy
 #[derive(Default, Copy, Clone, PartialEq)]

@@ -9,9 +9,11 @@ use eframe::{
 };
 
 use crate::{
-    project::{Chain, ChainRow, Project, ProjectEvent, ProjectLocation, ROWS_PER_PHRASE},
+    project::{
+        Chain, ChainRow, Project, ProjectEvent, ProjectLocation, ROWS_PER_CHAIN, ROWS_PER_PHRASE,
+    },
     selection::{self, SelectionCoords},
-    synth::{PlayerCmd, ROProject},
+    synth::{PlayerCmd, PlayerScope, ROProject},
     AppUIState, Page, PageID,
 };
 
@@ -54,6 +56,8 @@ impl Default for ChainUI {
 impl Page for ChainUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         let chain_opt = state.viewed_chain.and_then(|id| project.chains().get(&id));
+
+        Self::handle_player_buffer(&self.local_state, state, project);
         ScrollArea::vertical().show(ui, |ui| {
             if let (Some(chain), Some(id)) = (chain_opt, state.viewed_chain) {
                 if self.local_state.chain != *chain {
@@ -123,54 +127,155 @@ impl Page for ChainUI {
             return;
         };
 
-        // find end of chain
-        let project_read = project.read().unwrap();
-        let Some(first_none_offset) = project_read
-            .tracks()
-            .get(track_idx)
-            .and_then(|track| track.chains.get(chain_offset))
-            .and_then(|chain_id_opt| *chain_id_opt)
-            .and_then(|chain_id| project_read.chains().get(&chain_id))
-            .map(|chain| &chain.rows)
-            .map(|rows| {
-                rows.iter()
-                    .position(|row| row.phrase.is_none())
-                    .unwrap_or(rows.len())
-            })
+        let Some(last_phrase_offset) =
+            Self::get_last_row_to_play(track_idx, chain_offset, &project.read().unwrap())
         else {
             return;
         };
-
-        // if the first slot in the chain doesn't contain a phrase id
-        if first_none_offset == 0 {
-            return;
-        }
 
         let phrase_offset = match self.tool {
             Tool::Select(Some(((_, row1), (_, row2)))) => std::cmp::min(row1, row2),
             _ => 0,
         };
 
-        let starts = vec![ProjectLocation {
-            track_idx,
-            chain_offset,
-            phrase_offset,
-            note_offset: 0,
-        }];
+        let scope = PlayerScope {
+            first_notes: vec![ProjectLocation {
+                track_idx,
+                chain_offset,
+                phrase_offset,
+                note_offset: 0,
+            }]
+            .into(),
+            last_note: Some(ProjectLocation {
+                track_idx,
+                chain_offset,
+                phrase_offset: last_phrase_offset,
+                note_offset: ROWS_PER_PHRASE - 1,
+            }),
+        };
 
-        let end = Some(ProjectLocation {
-            track_idx,
-            chain_offset,
-            phrase_offset: first_none_offset.saturating_sub(1),
-            note_offset: ROWS_PER_PHRASE - 1,
-        });
-
-        drop(project_read);
-        state.player.play(project, starts.into(), end);
+        state.player.play(project, scope);
     }
 }
 
 impl ChainUI {
+    fn get_last_row_to_play(
+        track_idx: usize,
+        chain_offset: usize,
+        project: &Project,
+    ) -> Option<usize> {
+        // find end of chain
+        let first_none_offset = project
+            .tracks()
+            .get(track_idx)
+            .and_then(|track| track.chains.get(chain_offset))
+            .and_then(|chain_id_opt| *chain_id_opt)
+            .and_then(|chain_id| project.chains().get(&chain_id))
+            .map(|chain| &chain.rows)
+            .map(|rows| {
+                rows.iter()
+                    .position(|row| row.phrase.is_none())
+                    .unwrap_or(rows.len())
+            })?;
+
+        // if the first slot in the chain doesn't contain a phrase id
+        if first_none_offset == 0 {
+            None
+        } else {
+            Some(first_none_offset.saturating_sub(1))
+        }
+    }
+
+    fn project_location_to_chain_id(project: &Project, location: &ProjectLocation) -> Option<u32> {
+        project
+            .tracks()
+            .get(location.track_idx)
+            .and_then(|track| track.chains.get(location.chain_offset))
+            .and_then(|chain_id| *chain_id)
+    }
+
+    fn handle_player_buffer(s: &ChainUIState, state: &AppUIState, project: &Project) {
+        let (scope_tx, scope_rx) = mpsc::channel();
+        let (buf_tx, buf_rx) = mpsc::channel();
+        state.player.send_command(PlayerCmd::RequestScope(scope_tx));
+        state.player.send_command(PlayerCmd::RequestBuffer(buf_tx));
+
+        let (Ok(scope), Ok(buf)) = (scope_rx.recv(), buf_rx.recv()) else {
+            return;
+        };
+
+        // if playing multiple (or no) tracks, abort function
+        if scope.first_notes.len() != 1 {
+            return;
+        }
+
+        let Some(scope_start) = &scope.first_notes.first() else {
+            return;
+        };
+        // there is always an end marker when playing just a chain
+        let Some(scope_end) = &scope.last_note else {
+            return;
+        };
+
+        // abort if not playing just a chain
+        // todo: simplify this
+        if !(scope_start.track_idx == scope_end.track_idx
+            && scope_start.chain_offset == scope_end.chain_offset)
+        {
+            if !((scope_start.phrase_offset == scope_end.phrase_offset
+                && scope_start.note_offset <= scope_end.note_offset)
+                || scope_start.phrase_offset < scope_end.phrase_offset)
+            {
+                return;
+            }
+        }
+
+        // abort if playing same phrase_id that is being viewed
+        if Some(s.chain_id) == Self::project_location_to_chain_id(project, scope_start) {
+            return;
+        }
+
+        // abort if buffer is of the same phrase as is being viewed
+        if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone()) {
+            if let Some(buf_start) = first_notes.first() {
+                if Self::project_location_to_chain_id(project, buf_start) == Some(s.chain_id) {
+                    return;
+                }
+            }
+        }
+
+        // update player buffer
+        let Some(track_idx) = state.viewed_track else {
+            return;
+        };
+        let Some(chain_offset) = state.track_selected_row else {
+            return;
+        };
+        let Some(last_phrase_offset) = Self::get_last_row_to_play(track_idx, chain_offset, project)
+        else {
+            return;
+        };
+        let new_buffer = PlayerScope {
+            first_notes: vec![ProjectLocation {
+                track_idx,
+                chain_offset,
+                phrase_offset: 0,
+                note_offset: 0,
+            }]
+            .into(),
+            last_note: Some(ProjectLocation {
+                track_idx,
+                chain_offset,
+                phrase_offset: last_phrase_offset,
+                note_offset: ROWS_PER_PHRASE - 1,
+            }),
+        };
+
+        state
+            .player
+            .send_command(PlayerCmd::UpdateBuffer(new_buffer));
+    }
+
     fn handle_keybinds(ui: &mut Ui, tool: &mut Tool) {
         if ui.input(|i| i.key_pressed(Key::E)) {
             *tool = Tool::Edit;

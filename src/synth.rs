@@ -2,10 +2,10 @@ use std::{
     cell::RefCell,
     f32::consts::PI,
     sync::{
-        mpsc::{self, Receiver, Sender, TryRecvError},
+        mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError},
         Arc, LockResult, RwLock, RwLockReadGuard,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
@@ -13,8 +13,8 @@ use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use crate::{
     helpers,
     project::{
-        Instrument, InstrumentDataTable, InstrumentVariant, Note, NoteEffects, Project,
-        ProjectLocation, ProjectSettings, SlideEffect, TrackSettings, VOICES_PER_TRACK,
+        InstrumentDataTable, InstrumentVariant, NoteEffects, Project, ProjectLocation,
+        ProjectSettings, SlideEffect, TrackSettings, VOICES_PER_TRACK,
     },
 };
 
@@ -35,13 +35,21 @@ impl ROProject {
 }
 
 pub enum PlayerCmd {
-    UpdateBuffer(u32),
+    UpdateBuffer(PlayerScope),
     Pause,
     Resume,
     Stop,
     Dummy,
     RequestIsPaused(Sender<bool>),
     RequestLocation(Sender<Vec<Option<ProjectLocation>>>),
+    RequestScope(Sender<Arc<PlayerScope>>),
+    RequestBuffer(Sender<Option<Arc<PlayerScope>>>),
+}
+
+#[derive(Clone)]
+pub struct PlayerScope {
+    pub first_notes: Arc<[ProjectLocation]>,
+    pub last_note: Option<ProjectLocation>,
 }
 
 #[derive(Default)]
@@ -50,20 +58,52 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn play(
-        &self,
-        project: ROProject,
-        start: Arc<[ProjectLocation]>,
-        end: Option<ProjectLocation>,
-    ) {
+    // todo: use PlayerScope
+    pub fn play(&self, project: ROProject, scope: PlayerScope) {
         let (tx, rx) = mpsc::channel();
         {
             *self.playing.borrow_mut() = Some(tx);
         }
 
         std::thread::spawn(move || {
-            Self::play_thread(project, start, end, rx);
+            Self::play_thread(project, Arc::new(scope), rx);
         });
+    }
+
+    fn is_playing_a_chain(
+        start: Arc<[ProjectLocation]>,
+        last_note: Option<&ProjectLocation>,
+    ) -> bool {
+        let Some(last_note) = last_note else {
+            return false;
+        };
+
+        let Some(first_note) = start.first() else {
+            return false;
+        };
+
+        first_note.track_idx == last_note.track_idx
+            && first_note.chain_offset == last_note.chain_offset
+            && first_note.phrase_offset <= last_note.phrase_offset
+            && first_note.note_offset <= last_note.note_offset
+    }
+
+    fn is_playing_a_phrase(
+        start: Arc<[ProjectLocation]>,
+        last_note: Option<&ProjectLocation>,
+    ) -> bool {
+        let Some(last_note) = last_note else {
+            return false;
+        };
+
+        let Some(start) = start.first() else {
+            return false;
+        };
+
+        start.track_idx == last_note.track_idx
+            && start.chain_offset == last_note.chain_offset
+            && start.phrase_offset == last_note.phrase_offset
+            && start.note_offset <= last_note.note_offset
     }
 
     pub fn is_playing(&self) -> bool {
@@ -87,12 +127,7 @@ impl Player {
         let _ = playing.send(command);
     }
 
-    fn play_thread(
-        project: ROProject,
-        start: Arc<[ProjectLocation]>,
-        end: Option<ProjectLocation>,
-        rx: Receiver<PlayerCmd>,
-    ) {
+    fn play_thread(project: ROProject, mut scope: Arc<PlayerScope>, rx: Receiver<PlayerCmd>) {
         let note_pool = NotePool::default();
         let mut paused = false;
 
@@ -101,8 +136,12 @@ impl Player {
         let mut last_note_time = Instant::now();
         let mut project_settings = project.read().unwrap().settings().clone();
 
+        // buffer - move onto this after reaching end
+        let mut buffer: Option<Arc<PlayerScope>> = None;
+
         // if a position within a track is `None`, then the track is finished
-        let mut current_pos = start
+        let mut current_pos = scope
+            .first_notes
             .iter()
             .cloned()
             .map(Some)
@@ -112,9 +151,17 @@ impl Player {
 
         'main: loop {
             // handle commands
+            let ms_per_note =
+                helpers::ticks_to_duration(1.0, project.read().unwrap().settings().tempo)
+                    .as_millis();
+
             loop {
-                match rx.try_recv() {
-                    Ok(PlayerCmd::UpdateBuffer(_)) => (),
+                let timeout = ms_per_note.saturating_sub(last_note_time.elapsed().as_millis());
+
+                match rx.recv_timeout(Duration::from_millis(timeout as u64)) {
+                    Ok(PlayerCmd::UpdateBuffer(scope)) => {
+                        buffer = Some(scope.into());
+                    }
                     Ok(PlayerCmd::Stop) => break 'main,
                     Ok(PlayerCmd::Pause) => paused = true,
                     Ok(PlayerCmd::Resume) => paused = false,
@@ -124,9 +171,15 @@ impl Player {
                     Ok(PlayerCmd::RequestLocation(tx)) => {
                         let _ = tx.send(current_pos.clone());
                     }
+                    Ok(PlayerCmd::RequestScope(tx)) => {
+                        let _ = tx.send(scope.clone());
+                    }
+                    Ok(PlayerCmd::RequestBuffer(tx)) => {
+                        let _ = tx.send(buffer.clone());
+                    }
                     Ok(PlayerCmd::Dummy) => (),
-                    Err(TryRecvError::Empty) => (),
-                    Err(TryRecvError::Disconnected) => break 'main,
+                    Err(RecvTimeoutError::Timeout) => (),
+                    Err(RecvTimeoutError::Disconnected) => break 'main,
                 };
                 if !paused {
                     break;
@@ -140,10 +193,6 @@ impl Player {
                     project.read().unwrap().settings().clone(),
                 ));
             }
-
-            let ms_per_note =
-                helpers::ticks_to_duration(1.0, project.read().unwrap().settings().tempo)
-                    .as_millis();
 
             if last_note_time.elapsed().as_millis() < ms_per_note {
                 continue;
@@ -162,6 +211,7 @@ impl Player {
 
             let mut all_tracks_finished = true;
 
+            // go through each track and play the notes
             for track_location_opt in current_pos.iter_mut() {
                 let Some(track_location) = track_location_opt else {
                     continue;
@@ -175,7 +225,7 @@ impl Player {
 
                 let new_location_opt = project.increment_project_location(*track_location);
                 match new_location_opt {
-                    Some(new_location) if Some(*track_location) != end => {
+                    Some(new_location) if Some(*track_location) != scope.last_note => {
                         *track_location = new_location
                     }
                     _ => {
@@ -184,13 +234,24 @@ impl Player {
                 };
             }
 
-            if all_tracks_finished && !project_settings.loop_player {
-                to_end = true;
-            } else if all_tracks_finished && project_settings.loop_player {
-                current_pos
-                    .iter_mut()
-                    .zip(start.iter())
-                    .for_each(|(current_pos, start_pos)| *current_pos = Some(*start_pos));
+            // should end?
+            // if all_tracks_finished, move onto buffer. If there's no buffer, loop if loop_player
+            // setting is enabled.
+            if all_tracks_finished {
+                if let Some(new_scope) = buffer.take() {
+                    scope = new_scope;
+                    current_pos
+                        .iter_mut()
+                        .zip(scope.first_notes.iter())
+                        .for_each(|(current_pos, start_pos)| *current_pos = Some(*start_pos));
+                } else if project_settings.loop_player {
+                    current_pos
+                        .iter_mut()
+                        .zip(scope.first_notes.iter())
+                        .for_each(|(current_pos, start_pos)| *current_pos = Some(*start_pos));
+                } else {
+                    to_end = true;
+                }
             } else {
                 last_note_time = Instant::now();
             }

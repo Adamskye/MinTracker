@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 
 use eframe::{
     egui::{
@@ -15,7 +15,7 @@ use crate::{
         Note, Phrase, Project, ProjectEvent, ProjectLocation, MID_A_SEMITONE, ROWS_PER_PHRASE,
     },
     selection::{self, SelectionCoords},
-    synth::{PlayerCmd, ROProject},
+    synth::{PlayerCmd, PlayerScope, ROProject},
     AppUIState, Page,
 };
 
@@ -73,6 +73,8 @@ impl Page for PhraseUI {
         let phrase_opt = state
             .viewed_phrase
             .and_then(|id| project.phrases().get(&id));
+
+        Self::handle_player_buffer(&self.local_state, state, project);
 
         ScrollArea::both().show(ui, |ui| {
             if let (Some(phrase), Some(id)) = (phrase_opt, state.viewed_phrase) {
@@ -145,24 +147,119 @@ impl Page for PhraseUI {
             _ => 0,
         };
 
-        let starts = vec![ProjectLocation {
-            track_idx,
-            chain_offset,
-            phrase_offset,
-            note_offset,
-        }];
-        let end = Some(ProjectLocation {
-            track_idx,
-            chain_offset,
-            phrase_offset,
-            note_offset: ROWS_PER_PHRASE - 1,
-        });
+        let scope = PlayerScope {
+            first_notes: vec![ProjectLocation {
+                track_idx,
+                chain_offset,
+                phrase_offset,
+                note_offset,
+            }]
+            .into(),
+            last_note: Some(ProjectLocation {
+                track_idx,
+                chain_offset,
+                phrase_offset,
+                note_offset: ROWS_PER_PHRASE - 1,
+            }),
+        };
 
-        state.player.play(project, starts.into(), end);
+        state.player.play(project, scope);
     }
 }
 
 impl PhraseUI {
+    fn project_location_to_phrase_id(project: &Project, location: &ProjectLocation) -> Option<u32> {
+        project
+            .tracks()
+            .get(location.track_idx)
+            .and_then(|track| track.chains.get(location.chain_offset))
+            .and_then(|chain_id| *chain_id)
+            .and_then(|chain_id| project.chains().get(&chain_id))
+            .and_then(|chain| chain.rows.get(location.phrase_offset))
+            .and_then(|row| row.phrase)
+    }
+
+    fn handle_player_buffer(s: &PhraseUIState, state: &AppUIState, project: &Project) {
+        let (scope_tx, scope_rx) = mpsc::channel();
+        let (buf_tx, buf_rx) = mpsc::channel();
+        state.player.send_command(PlayerCmd::RequestScope(scope_tx));
+        state.player.send_command(PlayerCmd::RequestBuffer(buf_tx));
+
+        let (Ok(scope), Ok(buf)) = (scope_rx.recv(), buf_rx.recv()) else {
+            return;
+        };
+
+        // if playing multiple (or no) tracks, abort function
+        if scope.first_notes.len() != 1 {
+            return;
+        }
+
+        let Some(scope_start) = &scope.first_notes.first() else {
+            return;
+        };
+        // there is always an end marker when playing just a phrase
+        let Some(scope_end) = &scope.last_note else {
+            return;
+        };
+
+        // abort if not playing just a phrase
+        if !(scope_start.track_idx == scope_end.track_idx
+            && scope_start.chain_offset == scope_end.chain_offset
+            && scope_start.phrase_offset == scope_end.phrase_offset
+            && scope_start.note_offset <= scope_end.note_offset)
+        {
+            return;
+        }
+
+        // abort if playing same phrase_id that is being viewed
+        if Some(s.phrase_id)
+            == Self::project_location_to_phrase_id(project, scope_start)
+        {
+            return;
+        }
+
+        // abort if buffer is of the same phrase as is being viewed
+        if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone()) {
+            if let Some(buf_start) = first_notes.first() {
+                if Self::project_location_to_phrase_id(project, buf_start)
+                    == Some(s.phrase_id)
+                {
+                    return;
+                }
+            }
+        }
+
+        // update player buffer
+        let Some(track_idx) = state.viewed_track else {
+            return;
+        };
+        let Some(chain_offset) = state.track_selected_row else {
+            return;
+        };
+        let Some(phrase_offset) = state.chain_selected_row else {
+            return;
+        };
+        let new_buffer = PlayerScope {
+            first_notes: vec![ProjectLocation {
+                track_idx,
+                chain_offset,
+                phrase_offset,
+                note_offset: 0,
+            }]
+            .into(),
+            last_note: Some(ProjectLocation {
+                track_idx,
+                chain_offset,
+                phrase_offset,
+                note_offset: ROWS_PER_PHRASE - 1,
+            }),
+        };
+
+        state
+            .player
+            .send_command(PlayerCmd::UpdateBuffer(new_buffer));
+    }
+
     fn handle_keybinds(&mut self, ui: &mut Ui) {
         if ui.input(|i| i.key_pressed(Key::E)) {
             self.tool = Tool::Edit;
