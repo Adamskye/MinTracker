@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     error::Error,
     fs::File,
     path::PathBuf,
@@ -8,7 +7,7 @@ use std::{
 
 use chain_ui::ChainUI;
 use eframe::{
-    egui::{self, Button, Color32, DragValue, Key, Separator, Slider, Stroke, Ui, ViewportCommand},
+    egui::{self, Button, Color32, DragValue, Key, Separator, Slider, Ui, ViewportCommand},
     App,
 };
 use egui::{Align, Layout, Vec2};
@@ -48,7 +47,7 @@ trait Page {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
     fn handle_undo(&mut self, project: &Project);
-    fn play(&self, state: &AppUIState, project: ROProject) {}
+    fn play(&self, _state: &AppUIState, _project: ROProject) {}
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -360,10 +359,10 @@ impl MinTracker {
     }
 
     fn menubar(&mut self, ui: &mut Ui) {
-        egui::menu::bar(ui, |ui| {
+        egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Open").clicked() {
-                    ui.close_menu();
+                    ui.close();
                     loop {
                         let res = self.load();
                         if let Err(e) = res {
@@ -374,7 +373,7 @@ impl MinTracker {
                     }
                 }
                 if ui.button("Save").clicked() {
-                    ui.close_menu();
+                    ui.close();
                     loop {
                         let res = self.save();
                         if let Err(e) = res {
@@ -385,7 +384,7 @@ impl MinTracker {
                     }
                 }
                 if ui.button("Clean Project").clicked() {
-                    ui.close_menu();
+                    ui.close();
                     self.project
                         .read()
                         .unwrap()

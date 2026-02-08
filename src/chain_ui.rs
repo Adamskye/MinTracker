@@ -9,9 +9,7 @@ use eframe::{
 };
 
 use crate::{
-    project::{
-        Chain, ChainRow, Project, ProjectEvent, ProjectLocation, ROWS_PER_CHAIN, ROWS_PER_PHRASE,
-    },
+    project::{Chain, ChainRow, Project, ProjectEvent, ProjectLocation, ROWS_PER_PHRASE},
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, PlayerScope, ROProject},
     AppUIState, Page, PageID,
@@ -218,16 +216,14 @@ impl ChainUI {
         };
 
         // abort if not playing just a chain
-        // todo: simplify this
-        if !(scope_start.track_idx == scope_end.track_idx
-            && scope_start.chain_offset == scope_end.chain_offset)
-        {
-            if !((scope_start.phrase_offset == scope_end.phrase_offset
+        // TODO: simplify this
+        if !(scope_start.phrase_offset < scope_end.phrase_offset
+            || scope_start.track_idx == scope_end.track_idx
+                && scope_start.chain_offset == scope_end.chain_offset
+            || scope_start.phrase_offset == scope_end.phrase_offset
                 && scope_start.note_offset <= scope_end.note_offset)
-                || scope_start.phrase_offset < scope_end.phrase_offset)
-            {
-                return;
-            }
+        {
+            return;
         }
 
         // abort if playing same phrase_id that is being viewed
@@ -377,7 +373,7 @@ impl ChainUI {
         } else {
             Button::new(label)
         }
-        .rounding(0.0)
+        .corner_radius(0.0)
         .fill(Color32::TRANSPARENT)
         .sense(Sense::click_and_drag());
 
@@ -396,9 +392,9 @@ impl ChainUI {
         };
 
         if selected {
-            Frame::none().stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
+            Frame::new().stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
         } else {
-            Frame::none()
+            Frame::new()
         }
         .show(ui, |ui| {
             ui.add_sized(
@@ -482,7 +478,7 @@ impl ChainUI {
             };
 
             if ui.button("Create Phrase").clicked() {
-                ui.close_menu();
+                ui.close();
                 let id = Project::get_unique_key(project.phrases());
                 project.push_event(ProjectEvent::UpdatePhrase {
                     id,
@@ -492,12 +488,12 @@ impl ChainUI {
             }
 
             if ui.button("Delete").clicked() {
-                ui.close_menu();
+                ui.close();
                 *phrase = None;
             }
 
             if ui.button("Clone").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::clone_phrase(phrase, project);
             }
         });
@@ -510,13 +506,13 @@ impl ChainUI {
 
         response.context_menu(|ui| {
             if ui.button("Delete").clicked() {
-                ui.close_menu();
+                ui.close();
 
                 Self::delete_selection(&mut self.local_state.chain, coord1.1, coord2.1)
             }
 
             if ui.button("Cut").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::copy_selection(
                     &mut self.local_state.chain,
                     &mut self.clipboard,
@@ -527,7 +523,7 @@ impl ChainUI {
             }
 
             if ui.button("Copy").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::copy_selection(
                     &mut self.local_state.chain,
                     &mut self.clipboard,
@@ -537,8 +533,8 @@ impl ChainUI {
             }
 
             if ui.button("Paste").clicked() {
-                ui.close_menu();
-                Self::paste_selection(&mut self.local_state.chain, &mut self.clipboard, row);
+                ui.close();
+                Self::paste_selection(&mut self.local_state.chain, &self.clipboard, row);
             }
         });
     }
@@ -595,9 +591,9 @@ impl ChainUI {
         *clipboard = chain
             .rows
             .iter()
-            .cloned()
             .take(row1.max(row2) + 1)
             .skip(row1.min(row2))
+            .cloned()
             .collect::<Clipboard>();
     }
 

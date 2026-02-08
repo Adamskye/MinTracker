@@ -1,13 +1,10 @@
-use std::{f32::consts::PI, fs::File, io::BufReader, ops::Deref};
+use std::{f32::consts::PI, fs::File, io::BufReader};
 
-use eframe::{
-    egui::{
-        pos2, vec2, Color32, ComboBox, DragValue, PointerButton, Sense, Ui, WidgetInfo, WidgetType,
-        Window,
-    },
-    epaint::{ColorMode, PathStroke},
+use eframe::egui::{
+    pos2, vec2, Color32, ComboBox, DragValue, PointerButton, Sense, Stroke, Ui, WidgetInfo,
+    WidgetType, Window,
 };
-use rodio::{Decoder, Source as _};
+use rodio::Decoder;
 
 use crate::{
     helpers,
@@ -83,32 +80,32 @@ impl WaveformGraph {
 
         ui.menu_button("Presets", |ui| {
             if ui.button("Sine Wave").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::set_sine_wave(data_table);
             }
             if ui.button("Sawtooth Wave").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::set_sawtooth_wave(data_table);
             }
             if ui.button("Triangle Wave").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::set_triangle_wave(data_table);
             }
         });
 
         ui.menu_button("Transform", |ui| {
             if ui.button("Resize").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.resize_window = Some(ResizeWindow {
                     new_size: data_table.data.len(),
                 });
             }
             if ui.button("Multiply").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.multiply_window = Some(MultiplyWindow { multiplier: 1.0 });
             }
             if ui.button("Normalise").clicked() {
-                ui.close_menu();
+                ui.close();
                 let multiplier = data_table.data.iter().fold(f32::INFINITY, |acc, &point| {
                     acc.min(1.0 / point.value().abs())
                 });
@@ -126,7 +123,7 @@ impl WaveformGraph {
             InstrumentVariant::OneShotPitched(_) => "OneShot (Pitched)",
         };
 
-        ComboBox::from_id_source("instrument_variant_combobox")
+        ComboBox::from_id_salt("instrument_variant_combobox")
             .selected_text(selected_label)
             .show_ui(ui, |ui| {
                 let variant = &mut data_table.variant;
@@ -160,7 +157,7 @@ impl WaveformGraph {
             Window::new("Resize").show(ui.ctx(), |ui| {
                 ui.add(
                     DragValue::new(&mut resize_window.new_size)
-                        .range((0 as usize)..=(u16::MAX as usize))
+                        .range(0_usize..=(u16::MAX as usize))
                         .speed(1),
                 );
 
@@ -172,7 +169,6 @@ impl WaveformGraph {
                             data_table.data = (0..resize_window.new_size)
                                 .map(|i| {
                                     helpers::linear_interpolate(&data_table.data, i as f32 * step)
-                                        .into()
                                 })
                                 .collect::<Vec<SamplePoint>>();
                         }
@@ -271,18 +267,18 @@ impl WaveformGraph {
             // mark middle (horizontal line)
             painter.line_segment(
                 [rect.left_center(), rect.right_center()],
-                PathStroke {
+                Stroke {
                     width: 1.0,
-                    color: ColorMode::Solid(Color32::from_rgb(128, 128, 128)),
+                    color: Color32::from_rgb(128, 128, 128),
                 },
             );
 
             // mark middle (vertical line)
             painter.line_segment(
                 [rect.center_top(), rect.center_bottom()],
-                PathStroke {
+                Stroke {
                     width: 1.0,
-                    color: ColorMode::Solid(Color32::from_rgb(128, 128, 128)),
+                    color: Color32::from_rgb(128, 128, 128),
                 },
             );
 
@@ -308,9 +304,9 @@ impl WaveformGraph {
                 } else {
                     painter.line_segment(
                         [prev_pos, current_pos],
-                        PathStroke {
+                        Stroke {
                             width: 1.0,
-                            color: ColorMode::Solid(Color32::from_rgb(255, 255, 255)),
+                            color: Color32::from_rgb(255, 255, 255),
                         },
                     );
                     prev_pos = current_pos;
@@ -326,35 +322,22 @@ impl WaveformGraph {
             .map(|mut f| {
                 f.set_extension("wav");
                 f
-            });
+            })?;
 
-        if let Some(file) = path
-            .and_then(|path| File::open(path).ok())
-            .map(BufReader::new)
-        {
-            let result = Decoder::new(file).map(|src| {
-                src.convert_samples::<f32>()
-                    .map(|s| s.into())
-                    .collect::<Vec<SamplePoint>>()
-            });
+        let file = BufReader::new(File::open(path).ok()?);
+        let data = Decoder::new(file)
+            .ok()?
+            .map(Into::into)
+            .collect::<Vec<SamplePoint>>();
 
-            if let Ok(data) = result {
-                return Some(InstrumentDataTable {
-                    data,
-                    variant: InstrumentVariant::OneShotPitched(MID_A_FREQUENCY),
-                    ..Default::default()
-                });
-            }
-        }
-        None
+        Some(InstrumentDataTable {
+            data,
+            variant: InstrumentVariant::OneShotPitched(MID_A_FREQUENCY),
+            ..Default::default()
+        })
     }
 
     fn draw_info(ui: &mut Ui, data_table: &InstrumentDataTable) {
-        ui.horizontal(|ui| {
-            ui.label(format!(
-                "Num. Samples: {}",
-                data_table.data.len().to_string()
-            ))
-        });
+        ui.horizontal(|ui| ui.label(format!("Num. Samples: {}", data_table.data.len())));
     }
 }

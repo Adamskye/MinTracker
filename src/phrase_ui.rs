@@ -1,4 +1,4 @@
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 use eframe::{
     egui::{
@@ -212,18 +212,14 @@ impl PhraseUI {
         }
 
         // abort if playing same phrase_id that is being viewed
-        if Some(s.phrase_id)
-            == Self::project_location_to_phrase_id(project, scope_start)
-        {
+        if Some(s.phrase_id) == Self::project_location_to_phrase_id(project, scope_start) {
             return;
         }
 
         // abort if buffer is of the same phrase as is being viewed
         if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone()) {
             if let Some(buf_start) = first_notes.first() {
-                if Self::project_location_to_phrase_id(project, buf_start)
-                    == Some(s.phrase_id)
-                {
+                if Self::project_location_to_phrase_id(project, buf_start) == Some(s.phrase_id) {
                     return;
                 }
             }
@@ -371,7 +367,7 @@ impl PhraseUI {
                     Button::new(label)
                 }
                 .fill(bg_colour)
-                .rounding(0.0)
+                .corner_radius(0.0)
                 .sense(Sense::click_and_drag()),
             );
 
@@ -405,24 +401,24 @@ impl PhraseUI {
 
         response.context_menu(|ui| {
             if ui.button("Delete").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::delete_selection(phrase, coord1, coord2);
             }
 
             if ui.button("Cut").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::copy_selection(phrase, &mut self.clipboard, coord1, coord2);
                 Self::delete_selection(phrase, coord1, coord2);
             }
 
             if ui.button("Copy").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::copy_selection(phrase, &mut self.clipboard, coord1, coord2);
             }
 
             if ui.button("Paste").clicked() {
-                ui.close_menu();
-                Self::paste_selection(phrase, &mut self.clipboard, (voice_id, row));
+                ui.close();
+                Self::paste_selection(phrase, &self.clipboard, (voice_id, row));
             }
         });
     }
@@ -557,9 +553,9 @@ impl PhraseUI {
                     voice
                         .notes
                         .iter()
-                        .cloned()
                         .take(big_y + 1)
                         .skip(small_y)
+                        .cloned()
                         .collect(),
                 )
             });

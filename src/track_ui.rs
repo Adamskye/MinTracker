@@ -11,7 +11,7 @@ use itertools::Itertools;
 use std::sync::mpsc;
 
 use crate::{
-    project::{Chain, Project, ProjectLocation, Track, CHAINS_PER_TRACK},
+    project::{Project, ProjectLocation, Track, CHAINS_PER_TRACK},
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, PlayerScope, ROProject},
     AppUIState, Page, PageID, ProjectEvent,
@@ -215,7 +215,7 @@ impl TrackUI {
                             .unwrap_or("No Instrument".to_string());
 
                         let mut cb_instrument = track.settings.instrument;
-                        ComboBox::from_id_source(format!("Track instrument {track_num}"))
+                        ComboBox::from_id_salt(format!("Track instrument {track_num}"))
                             .selected_text(selected_text)
                             .show_ui(ui, |ui| {
                                 for (id, inst) in project.instruments() {
@@ -350,7 +350,7 @@ impl TrackUI {
         } else {
             Button::new(label)
         }
-        .rounding(0.0)
+        .corner_radius(0.0)
         .fill(Color32::TRANSPARENT)
         .sense(Sense::click_and_drag());
 
@@ -435,7 +435,7 @@ impl TrackUI {
     fn chain_context_menu(project: &Project, response: &Response, chain: &mut Option<u32>) {
         response.context_menu(|ui| {
             if ui.button("Create Chain").clicked() {
-                ui.close_menu();
+                ui.close();
                 let id = Project::get_unique_key(project.chains());
                 project.push_event(ProjectEvent::UpdateChain {
                     id,
@@ -444,20 +444,20 @@ impl TrackUI {
                 *chain = Some(id);
             }
             if ui.button("Delete Chain").clicked() {
-                ui.close_menu();
+                ui.close();
                 *chain = None;
             }
             if ui.button("Rename Chain").clicked() {
-                ui.close_menu();
+                ui.close();
             }
 
             if ui.button("Shallow Clone").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::shallow_clone(chain, project);
             }
 
             if ui.button("Deep Clone").clicked() {
-                ui.close_menu();
+                ui.close();
                 Self::deep_clone(chain, project);
             }
         });
@@ -466,23 +466,23 @@ impl TrackUI {
     fn selection_context_menu(&mut self, response: &Response, row: usize, track_num: usize) {
         response.context_menu(|ui| {
             if ui.button("Delete").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.delete_selection();
             }
 
             if ui.button("Cut").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.copy_selection();
                 self.delete_selection();
             }
 
             if ui.button("Copy").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.copy_selection();
             }
 
             if ui.button("Paste").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.paste_selection(row, track_num);
             }
         });
@@ -610,7 +610,7 @@ impl TrackUI {
             return;
         };
 
-        let Some(chain) = project.chains().get(&old_chain_id) else {
+        let Some(chain) = project.chains().get(old_chain_id) else {
             return;
         };
 
@@ -630,7 +630,7 @@ impl TrackUI {
         };
 
         // shallow clone the chain
-        let Some(mut new_chain) = project.chains().get(&old_chain_id).cloned() else {
+        let Some(mut new_chain) = project.chains().get(old_chain_id).cloned() else {
             return;
         };
 

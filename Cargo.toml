@@ -6,12 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-eframe = "0.28.1"
-itertools = "0.13.0"
-#env_logger = "0.11.3"
-rfd = "0.14.1"
-rodio = "0.19.0"
-serde = { version = "1.0.204", features=["rc", "derive"] }
+anyhow = "1.0.101"
+eframe = "0.33.3"
+itertools = "0.14.0"
+rfd = "0.17.2"
+rodio = "0.21.1"
+serde = { version = "1.0.228", features=["rc", "derive"] }
 serde-big-array = "0.5.1"
 serde_cbor = "0.11.2"
-tracing = "0.1.40"
+tracing = "0.1.44"

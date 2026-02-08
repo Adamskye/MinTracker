@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::helpers;
-
 use super::NoteEffects;
 
 pub const NUM_SEMITONES: u8 = 108;
@@ -17,12 +15,6 @@ pub struct Note {
 }
 
 impl Note {
-    pub fn new(semitone: Option<u8>) -> Self {
-        let mut note = Self::default();
-        note.set_semitone(semitone);
-        note
-    }
-
     pub fn has_effects(&self) -> bool {
         self.effects != NoteEffects::default()
     }

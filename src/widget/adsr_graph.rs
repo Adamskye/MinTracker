@@ -1,6 +1,6 @@
 use eframe::{
-    egui::{self, DragValue, Grid, Ui},
-    epaint::{pos2, Color32, ColorMode, PathStroke, Pos2, Rect},
+    egui::{self, DragValue, Stroke, Ui},
+    epaint::{pos2, Color32, Pos2, Rect},
 };
 
 use crate::project::ADSREnvelope;
@@ -86,15 +86,15 @@ fn draw_adsr_graph(ui: &mut Ui, env: &mut ADSREnvelope) {
             point.y += rect.top();
         }
 
-        let stroke = PathStroke {
+        let stroke = Stroke {
             width: 1.0,
-            color: ColorMode::Solid(Color32::from_rgb(255, 255, 255)),
+            color: Color32::from_rgb(255, 255, 255),
         };
 
         // draw lines between main points
-        painter.line_segment([points[0], points[1]], stroke.clone());
-        painter.line_segment([points[1], points[2]], stroke.clone());
-        painter.line_segment([points[2], points[3]], stroke.clone());
+        painter.line_segment([points[0], points[1]], stroke);
+        painter.line_segment([points[1], points[2]], stroke);
+        painter.line_segment([points[2], points[3]], stroke);
 
         // update main points
         if let Some(p) = adsr_graph_point(ui, points[1]) {
@@ -107,7 +107,7 @@ fn draw_adsr_graph(ui: &mut Ui, env: &mut ADSREnvelope) {
             env.decay_ms = env.decay_ms.saturating_sub(env.attack_ms);
         }
         if let Some(p) = adsr_graph_point(ui, points[3]) {
-            points[3] = p;
+            //points[3] = p;
             env.release_ms = point_to_value(p, &rect, width_multiplier).0;
             env.release_ms = env.release_ms.saturating_sub(env.decay_ms + env.attack_ms);
         }

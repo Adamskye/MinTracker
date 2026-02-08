@@ -343,7 +343,7 @@ impl Project {
             .tracks()
             .get(location.track_idx)?
             .settings
-            .transpose_semitones as f32;
+            .transpose_semitones;
         let inside_chain = self
             .tracks()
             .get(location.track_idx)

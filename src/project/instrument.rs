@@ -1,7 +1,4 @@
-use std::{
-    ops::{Deref, Div, Mul, MulAssign},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use super::NUM_SEMITONES;
 use serde::{Deserialize, Serialize};
@@ -59,7 +56,7 @@ impl ADSREnvelope {
         }
 
         let gradient = -vol_when_stopped / self.release_ms as f32;
-        let return_val = (vol_when_stopped + (gradient * time_since_stopped as f32)) * self.volume;
+        let return_val = (vol_when_stopped + (gradient * time_since_stopped)) * self.volume;
 
         if return_val <= 0.0 {
             None
@@ -85,9 +82,9 @@ impl SamplePoint {
     }
 }
 
-impl Into<f32> for SamplePoint {
-    fn into(self) -> f32 {
-        self.0
+impl From<SamplePoint> for f32 {
+    fn from(value: SamplePoint) -> Self {
+        value.0
     }
 }
 

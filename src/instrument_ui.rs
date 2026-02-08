@@ -109,7 +109,7 @@ impl InstrumentUI {
             // combobox
             let mut cb_instrument = state.viewed_instrument;
             let inst_before = cb_instrument;
-            ComboBox::from_id_source("instrument_ui_selected_instrument")
+            ComboBox::from_id_salt("instrument_ui_selected_instrument")
                 .selected_text(selected_label)
                 .show_ui(ui, |ui| {
                     for (id, inst) in project.instruments() {

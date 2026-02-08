@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
 
 use crate::{
     helpers,
@@ -70,6 +70,7 @@ impl Player {
         });
     }
 
+    #[allow(dead_code)]
     fn is_playing_a_chain(
         start: Arc<[ProjectLocation]>,
         last_note: Option<&ProjectLocation>,
@@ -88,6 +89,7 @@ impl Player {
             && first_note.note_offset <= last_note.note_offset
     }
 
+    #[allow(dead_code)]
     fn is_playing_a_phrase(
         start: Arc<[ProjectLocation]>,
         last_note: Option<&ProjectLocation>,
@@ -220,7 +222,7 @@ impl Player {
                 all_tracks_finished = false;
 
                 for voice_idx in 0..VOICES_PER_TRACK {
-                    note_pool.play_note(voice_idx, &project, &track_location);
+                    note_pool.play_note(voice_idx, &project, track_location);
                 }
 
                 let new_location_opt = project.increment_project_location(*track_location);
@@ -261,18 +263,16 @@ impl Player {
 
 pub struct NotePool {
     tracklist: RefCell<Vec<[Option<Sender<OscillatorMsg>>; VOICES_PER_TRACK]>>, // tracklist[track][voice]
-
-    _stream: OutputStream,
-    stream_handle: OutputStreamHandle,
+    stream: OutputStream,
 }
 
 impl Default for NotePool {
     fn default() -> Self {
-        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+        // TODO: do get rid of unwrap here
+        let stream = OutputStreamBuilder::open_default_stream().unwrap();
         Self {
             tracklist: Default::default(),
-            _stream,
-            stream_handle,
+            stream,
         }
     }
 }
@@ -323,10 +323,7 @@ impl NotePool {
 
             // start semitone
             self.send_message(location.track_idx, voice, OscillatorMsg::GetFrequency(tx));
-            slide_effect.start_semitone = rx
-                .recv()
-                .ok()
-                .map(|freq| helpers::semitone_from_frequency(freq));
+            slide_effect.start_semitone = rx.recv().ok().map(helpers::semitone_from_frequency);
         }
 
         // access tracklist and resize if needed
@@ -357,11 +354,8 @@ impl NotePool {
         );
         let wo = wo.stoppable().amplify(0.2);
 
-        let Some(sink) = Sink::try_new(&self.stream_handle).ok().inspect(|sink| {
-            sink.append(wo);
-        }) else {
-            return;
-        };
+        let sink = Sink::connect_new(self.stream.mixer());
+        sink.append(wo);
         tracklist[location.track_idx][voice] = Some(tx);
 
         if let Some(tx) = &tracklist[location.track_idx][voice] {
@@ -398,6 +392,7 @@ impl NotePool {
             });
     }
 
+    #[allow(dead_code)]
     pub fn stop_note(&self, track: usize, voice: usize) {
         if let Some(voice) = self
             .tracklist
@@ -547,7 +542,7 @@ impl WavetableOscillator {
                     Some(v) => {
                         let time_ms = Self::sample_counter_to_ms(self.vibrato_counter);
                         let semitone_diff =
-                            f32::sin((2.0 * PI * time_ms) / v.speed as f32) * v.amplitude as f32;
+                            f32::sin((2.0 * PI * time_ms) / v.speed as f32) * v.amplitude;
                         let multiplier = 2.0_f32.powf(semitone_diff / 12.0);
                         self.vibrato_counter = self.vibrato_counter.saturating_add(1);
                         multiplier
@@ -654,10 +649,7 @@ impl WavetableOscillator {
 
         Some(if self.stereo_first_ear {
             if let Some(time_when_stopped) = self.time_when_stopped {
-                match envelope.volume_at_time_stopped(time_ms, time_when_stopped) {
-                    Some(v) => v,
-                    None => return None,
-                }
+                envelope.volume_at_time_stopped(time_ms, time_when_stopped)?
             } else {
                 envelope.volume_at_time(time_ms)
             }
@@ -685,7 +677,7 @@ impl WavetableOscillator {
                 self.kill_counter = self.kill_counter.saturating_add(1);
             }
         }
-        return false;
+        false
     }
 
     fn handle_soft_kill_effect(&mut self) {
@@ -756,7 +748,7 @@ impl Iterator for WavetableOscillator {
 }
 
 impl Source for WavetableOscillator {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 

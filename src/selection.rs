@@ -1,12 +1,10 @@
-use eframe::egui::{Response, Ui};
-
 /**
  * This file contains helpers for handling selections as well as tracking when the user cuts,
  * copies, pastes, or deletes a selection.
  */
+use eframe::egui::{Response, Ui};
 
 pub type SelectionCoords = Option<((usize, usize), (usize, usize))>;
-
 pub fn handle_widget_selecting(
     ui: &mut Ui,
     coords: &mut SelectionCoords,

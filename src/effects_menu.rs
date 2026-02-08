@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use eframe::egui::{Align, Button, DragValue, Layout, Separator, Ui};
+use eframe::egui::{Button, DragValue, Ui};
 
 use crate::{
     project::{
