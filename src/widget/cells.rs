@@ -1,5 +1,5 @@
 use eframe::egui::{
-    self, Align, Color32, Direction, Id, Key, Layout, Rect, Sense, Stroke, Ui, UiBuilder,
+    self, Align, Color32, Direction, Id, Layout, Rect, Sense, Stroke, Ui, UiBuilder,
 };
 
 use crate::{project::Project, AppUIState};
@@ -171,19 +171,20 @@ pub fn cells<T, G>(
     ui.input(|i| {
         let mut new_row = env.selected_row();
         let mut new_col = env.selected_col();
-        if i.key_pressed(Key::ArrowRight) {
+        let prefs = state.app_preferences();
+        if i.key_pressed(prefs.keybinds.right) {
             new_col = env.selected_col() + 1;
             should_scroll_to_selected = true;
         }
-        if i.key_pressed(Key::ArrowLeft) {
+        if i.key_pressed(prefs.keybinds.left) {
             new_col = env.selected_col().saturating_sub(1);
             should_scroll_to_selected = true;
         }
-        if i.key_pressed(Key::ArrowDown) {
+        if i.key_pressed(prefs.keybinds.down) {
             new_row = env.selected_row() + 1;
             should_scroll_to_selected = true;
         }
-        if i.key_pressed(Key::ArrowUp) {
+        if i.key_pressed(prefs.keybinds.up) {
             new_row = env.selected_row().saturating_sub(1);
             should_scroll_to_selected = true;
         }

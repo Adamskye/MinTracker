@@ -6,12 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.101"
+confy = "2.0.0"
+dioxus-devtools = "0.7.3"
 eframe = "0.33.3"
+egui = { version = "0.33.3", features = ["serde"] }
+egui-phosphor = "0.11.0"
 itertools = "0.14.0"
 rfd = "0.17.2"
 rodio = "0.21.1"
 serde = { version = "1.0.228", features=["rc", "derive"] }
 serde-big-array = "0.5.1"
 serde_cbor = "0.11.2"
+subsecond = "0.7.3"
 tracing = "0.1.44"
