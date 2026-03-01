@@ -1,3 +1,5 @@
+use crate::project::TrackSettings;
+
 use super::note::Note;
 use super::phrase::Phrase;
 use super::{instrument::Instrument, track::Track};
@@ -21,6 +23,15 @@ pub enum ProjectEvent {
     UpdateTrack {
         index: usize,
         new_track: Option<Box<Track>>,
+    },
+    UpdateTrackSettings {
+        index: usize,
+        new_settings: TrackSettings,
+    },
+    UpdateTrackCell {
+        track_index: usize,
+        chain_offset: usize,
+        new_chain_id: Option<u32>,
     },
     UpdateChain {
         id: u32,
@@ -122,27 +133,30 @@ impl Project {
             ev.pop_front()
         } {
             changed = true;
+            use ProjectEvent as PE;
             match event {
-                ProjectEvent::UpdateTrack { index, new_track } => {
-                    self.update_track(index, new_track);
+                PE::UpdateTrack { index, new_track } => self.update_track(index, new_track),
+                PE::UpdateTrackSettings {
+                    index,
+                    new_settings,
+                } => {
+                    self.update_track_settings(index, new_settings);
                 }
-                ProjectEvent::UpdateChain { id, new_chain } => self.update_chain(id, *new_chain),
-                ProjectEvent::UpdatePhrase { id, new_phrase } => {
-                    self.update_phrase(id, *new_phrase);
-                    //if let Some(old_phrase) = self.phrases.get_mut(&id) {
-                    //    *old_phrase = *new_phrase;
-                    //}
-                }
-                ProjectEvent::UpdateInstrument { id, new_instrument } => {
+                PE::UpdateTrackCell {
+                    track_index,
+                    chain_offset,
+                    new_chain_id,
+                } => self.update_track_cell(track_index, chain_offset, new_chain_id),
+                PE::UpdateChain { id, new_chain } => self.update_chain(id, *new_chain),
+                PE::UpdatePhrase { id, new_phrase } => self.update_phrase(id, *new_phrase),
+                PE::UpdateInstrument { id, new_instrument } => {
                     self.update_instrument(id, new_instrument)
                 }
-                ProjectEvent::UpdateSettings(settings) => self.settings = settings,
-                ProjectEvent::UpdateEffectPreset { id, new_preset } => {
-                    self.update_effect_preset(id, new_preset);
+                PE::UpdateSettings(settings) => self.settings = settings,
+                PE::UpdateEffectPreset { id, new_preset } => {
+                    self.update_effect_preset(id, new_preset)
                 }
-                ProjectEvent::CleanUnusedNotes => {
-                    self.clean_unused_notes();
-                }
+                PE::CleanUnusedNotes => self.clean_unused_notes(),
             }
         }
 
@@ -151,6 +165,25 @@ impl Project {
 
     pub fn push_event(&self, event: ProjectEvent) {
         self.event.lock().unwrap().push_back(event);
+    }
+
+    fn update_track_settings(&mut self, index: usize, new_settings: TrackSettings) {
+        if let Some(track) = self.tracks.get_mut(index) {
+            track.settings = new_settings;
+        }
+    }
+
+    fn update_track_cell(
+        &mut self,
+        track_index: usize,
+        chain_offset: usize,
+        new_chain_id: Option<u32>,
+    ) {
+        if let Some(track) = self.tracks.get_mut(track_index) {
+            if chain_offset < track.chains.len() {
+                track.chains[chain_offset] = new_chain_id;
+            }
+        }
     }
 
     fn clean_unused_notes(&mut self) {
@@ -264,18 +297,10 @@ impl Project {
             return;
         };
 
-        let track = match self.tracks.get_mut(index) {
-            Some(t) => t,
-            None => {
-                self.tracks.push(Default::default());
-                match self.tracks.last_mut() {
-                    Some(t) => t,
-                    None => return,
-                }
-            }
+        match self.tracks.get_mut(index) {
+            Some(track) => *track = *new_track,
+            None => self.tracks.push(*new_track),
         };
-
-        *track = *new_track;
     }
 
     pub fn update_chain(&mut self, chain_id: u32, new_chain: Chain) {
