@@ -1,6 +1,4 @@
-use eframe::egui::{
-    self, Align, Color32, Direction, Id, Layout, Rect, Sense, Stroke, Ui, UiBuilder,
-};
+use eframe::egui::{self, Align, Color32, Id, Rect, Sense, Stroke, Ui, UiBuilder};
 
 use crate::{AppUIState, helpers::to_colour32, project::Project};
 

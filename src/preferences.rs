@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Preferences {
+    pub general: General,
     pub keybinds: Keybinds,
     pub style: Style,
 }
@@ -13,6 +14,7 @@ impl Default for Preferences {
         Self {
             keybinds: Keybinds::default(),
             style: Style::default(),
+            general: General::default(),
         }
     }
 }
@@ -33,6 +35,19 @@ impl Preferences {
 impl Drop for Preferences {
     fn drop(&mut self) {
         self.save();
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct General {
+    pub notification_time: Option<f64>,
+}
+
+impl Default for General {
+    fn default() -> Self {
+        Self {
+            notification_time: Some(5.0),
+        }
     }
 }
 

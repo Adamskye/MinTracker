@@ -2,8 +2,12 @@ use eframe::egui::{self, Ui};
 use egui::{Key, RichText};
 
 use crate::{
-    app_ui_state::AppUIState, font_styling::FontStylingEx as _, keybinds::Keybinds, page::Page,
-    preferences::Colours, project::Project,
+    app_ui_state::AppUIState,
+    font_styling::FontStylingEx as _,
+    keybinds::Keybinds,
+    page::Page,
+    preferences::{Colours, General},
+    project::Project,
 };
 
 type RebindFunc = Box<dyn Fn(Keybinds, Key) -> Keybinds>;
@@ -67,8 +71,56 @@ impl Page for PreferencesUI {
 }
 
 impl PreferencesUI {
-    fn general_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {}
+    fn general_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
+        egui::Grid::new("general_grid")
+            .num_columns(2)
+            .spacing([40.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(RichText::new("Setting").bold_ex());
+                ui.label(RichText::new("Value").bold_ex());
+                ui.end_row();
 
+                // notification time
+                let mut notifications_show_unlimited =
+                    ui_state.preferences().general.notification_time.is_none();
+
+                ui.label("Notification Time (s)");
+                ui.checkbox(&mut notifications_show_unlimited, "Unlimited");
+
+                if notifications_show_unlimited
+                    != ui_state.preferences().general.notification_time.is_none()
+                {
+                    ui_state.modify_preferences(|prefs| {
+                        prefs.general.notification_time = if notifications_show_unlimited {
+                            None
+                        } else {
+                            Some(5.0)
+                        }
+                    });
+                }
+
+                if let Some(time) = ui_state.preferences().general.notification_time {
+                    let mut new_time = time;
+                    ui.add(
+                        egui::DragValue::new(&mut new_time)
+                            .speed(0.01)
+                            .range(0.1..=60.0),
+                    );
+
+                    if time != new_time {
+                        ui_state.modify_preferences(|prefs| {
+                            prefs.general.notification_time = Some(new_time)
+                        });
+                    }
+                }
+                ui.end_row();
+            });
+
+        if ui.button("Reset to Default").clicked() {
+            ui_state.modify_preferences(|prefs| prefs.general = General::default())
+        }
+    }
     fn keybinds_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
         egui::Grid::new("keybinds_grid")
             .num_columns(2)
