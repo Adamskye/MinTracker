@@ -2,6 +2,7 @@ use eframe::{
     egui::{Button, ComboBox, Context, DragValue, Grid, Key, ScrollArea, Ui, Window},
     epaint::Color32,
 };
+use egui_phosphor::regular;
 use itertools::Itertools;
 
 use crate::{
@@ -42,33 +43,23 @@ impl CellData<TrackUIGridState> for TrackCellData {
 
     fn text(&self) -> Option<String> {
         match self {
-            TrackCellData::ChainButton { chain_id, .. } => {
-                Some(chain_id.map(|i| i.to_string()).unwrap_or("—".into()))
-            }
+            TrackCellData::ChainButton { chain_id, .. } => Some(
+                chain_id
+                    .map(|i| i.to_string())
+                    .unwrap_or(regular::MINUS.into()),
+            ),
+            TrackCellData::TrackOptionsButton { .. } => Some(regular::GEAR_SIX.into()),
             _ => None,
         }
     }
 
     fn inner_widget(
         &self,
-        ui: &mut Ui,
-        grid_state: &mut TrackUIGridState,
+        _ui: &mut Ui,
+        _grid_state: &mut TrackUIGridState,
         _state: &mut AppUIState,
         _project: &Project,
     ) {
-        let TrackCellData::TrackOptionsButton { track_index } = self else {
-            return;
-        };
-
-        if ui.button("⛭").clicked() {
-            // open track settings
-            grid_state.track_opened_settings =
-                if grid_state.track_opened_settings == Some(*track_index) {
-                    None
-                } else {
-                    Some(*track_index)
-                };
-        }
     }
 
     fn context_menu(
@@ -91,39 +82,58 @@ impl CellData<TrackUIGridState> for TrackCellData {
         }
     }
 
-    fn selected(
+    fn trigger_action(
         &self,
-        _track_ui: &mut TrackUIGridState,
+        grid_state: &mut TrackUIGridState,
         ui_state: &mut AppUIState,
         project: &Project,
     ) {
-        let TrackCellData::ChainButton {
-            track_index,
-            chain_offset,
-            chain_id,
-        } = self
-        else {
-            return;
-        };
-
-        if let Some(id) = chain_id {
-            // go to chain screen
-            ui_state.viewed_track = Some(*track_index);
-            ui_state.track_selected_row = Some(*chain_offset);
-            ui_state.viewed_chain = Some(*id);
-            ui_state.current_page = PageID::Chain;
-        } else {
-            // put a chain here
-            project.push_event(ProjectEvent::UpdateTrackCell {
-                track_index: *track_index,
-                chain_offset: *chain_offset,
-                new_chain_id: project.chains().iter().next().map(|(id, _)| *id),
-            });
+        match self {
+            TrackCellData::Empty => {}
+            TrackCellData::ChainButton {
+                track_index,
+                chain_offset,
+                chain_id,
+            } => {
+                if let Some(id) = chain_id {
+                    // go to chain screen
+                    ui_state.viewed_track = Some(*track_index);
+                    ui_state.track_selected_row = Some(*chain_offset);
+                    ui_state.viewed_chain = Some(*id);
+                    ui_state.current_page = PageID::Chain;
+                } else {
+                    // put a chain here
+                    project.push_event(ProjectEvent::UpdateTrackCell {
+                        track_index: *track_index,
+                        chain_offset: *chain_offset,
+                        new_chain_id: project.chains().iter().next().map(|(id, _)| *id),
+                    });
+                }
+            }
+            TrackCellData::TrackOptionsButton { .. } => {
+                self.on_click(grid_state, ui_state, project);
+            }
         }
     }
 
-    fn selectable(&self) -> bool {
-        matches!(self, TrackCellData::ChainButton { .. })
+    fn on_click(
+        &self,
+        grid_state: &mut TrackUIGridState,
+        _state: &mut AppUIState,
+        _project: &Project,
+    ) {
+        match self {
+            TrackCellData::TrackOptionsButton { track_index } => {
+                // open track settings
+                grid_state.track_opened_settings =
+                    if grid_state.track_opened_settings == Some(*track_index) {
+                        None
+                    } else {
+                        Some(*track_index)
+                    };
+            }
+            _ => {}
+        }
     }
 }
 
@@ -190,7 +200,6 @@ struct TrackUIGridState {
 pub struct TrackUI {
     tool: Tool,
     _clipboard: Clipboard,
-    //track_opened_settings: Option<usize>,
     grid_state: TrackUIGridState,
     cells_state: CellGrid<TrackCellData, TrackUIGridState>,
 }
@@ -200,7 +209,6 @@ impl Default for TrackUI {
         Self {
             tool: Tool::default(),
             _clipboard: Default::default(),
-            //track_opened_settings: None,
             grid_state: TrackUIGridState::default(),
             cells_state: CellGrid::new(CHAINS_PER_TRACK, 0),
         }
@@ -219,28 +227,8 @@ impl Page for TrackUI {
         });
     }
 
-    fn draw_side_buttons(&mut self, ui: &mut Ui, _state: &mut AppUIState, _project: &Project) {
-        let tool_selection = if let Tool::Select(sel) = self.tool {
-            sel
-        } else {
-            None
-        };
-
-        ui.selectable_value(&mut self.tool, Tool::Edit, "Edit");
-        ui.selectable_value(&mut self.tool, Tool::Select(tool_selection), "Select");
-    }
-
+    fn draw_side_buttons(&mut self, _ui: &mut Ui, _state: &mut AppUIState, _project: &Project) {}
     fn handle_undo(&mut self, _project: &Project) {}
-
-    // fn handle_undo(&mut self, project: &Project) {
-    //     let Some(new_state) = self.undoer.undo(&self.local_state) else {
-    //         return;
-    //     };
-    //
-    //     self.local_state = new_state.clone();
-    //
-    //     Self::update_project(&mut self.local_state, project);
-    // }
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let chain_offset = match self.tool {
@@ -261,6 +249,10 @@ impl Page for TrackUI {
         };
 
         state.player.play(project, scope);
+    }
+
+    fn heading(&self, _: &AppUIState) -> String {
+        "Song".to_string()
     }
 }
 
@@ -316,20 +308,10 @@ impl TrackUI {
             project,
         );
 
-        // Grid::new("track_grid_layout").show(ui, |ui| {
-        //     self.show_track_settings_select(ui);
-        //     ui.end_row();
-        //
-        //     for row in 0..CHAINS_PER_TRACK {
-        //         self.show_chain_row(ui, row, project, state, position_opt.as_ref());
-        //         ui.end_row();
-        //     }
-        // });
-
         self.show_track_settings(ui.ctx(), project);
 
         ui.vertical(|ui| {
-            if ui.button("Add Track").clicked() {
+            if ui.button(regular::PLUS).clicked() {
                 project.push_event(ProjectEvent::UpdateTrack {
                     index: project.tracks().len(),
                     new_track: Some(Box::new(Track::default())),
@@ -337,32 +319,6 @@ impl TrackUI {
             }
         });
     }
-
-    // fn show_track_settings_select(&mut self, ui: &mut Ui) {
-    //     // select track
-    //     for track_num in 0..self.local_state.tracks.len() {
-    //         ui.horizontal(|ui| {
-    //             // todo: determine if this is needed in either light or dark mode
-    //             //let fill_color = if self.track_opened_settings == Some(track_num) {
-    //             //    Color32::LIGHT_BLUE
-    //             //} else {
-    //             //    Color32::LIGHT_GRAY
-    //             //};
-    //
-    //             let button = Button::new("⛭")/*.fill(fill_color)*/;
-    //             ui.vertical_centered(|ui| {
-    //                 if ui.add(button).clicked() {
-    //                     self.track_opened_settings =
-    //                         if self.track_opened_settings == Some(track_num) {
-    //                             None
-    //                         } else {
-    //                             Some(track_num)
-    //                         };
-    //                 }
-    //             });
-    //         });
-    //     }
-    // }
 
     fn show_track_settings(&mut self, context: &Context, project: &Project) {
         let Some(track_num) = self.grid_state.track_opened_settings else {

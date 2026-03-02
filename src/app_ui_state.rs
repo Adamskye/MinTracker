@@ -12,18 +12,6 @@ pub enum PageID {
     Preferences,
 }
 
-impl PageID {
-    pub fn str(&self) -> &str {
-        match self {
-            PageID::Track => "Project",
-            PageID::Chain => "Chain",
-            PageID::Phrase => "Phrase",
-            PageID::Instrument => "Instrument",
-            PageID::Preferences => "Preferences",
-        }
-    }
-}
-
 #[derive(Default)]
 pub struct AppUIState {
     pub current_page: PageID,

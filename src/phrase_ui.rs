@@ -8,6 +8,7 @@ use eframe::{
     },
     epaint::{Color32, Stroke},
 };
+use egui_phosphor::regular;
 
 use crate::{
     effects_menu::EffectsMenu,
@@ -164,6 +165,10 @@ impl Page for PhraseUI {
         };
 
         state.player.play(project, scope);
+    }
+
+    fn heading(&self, state: &AppUIState) -> String {
+        format!("Phrase {}", state.viewed_phrase.unwrap_or_default())
     }
 }
 
@@ -484,7 +489,7 @@ impl PhraseUI {
             return;
         };
 
-        if ui.small_button("⬆").clicked() {
+        if ui.small_button(regular::ARROW_UP).clicked() {
             for i in (0..current_row).rev() {
                 let Some(phrase_id) = chain.rows.get(i).and_then(|row| row.phrase) else {
                     continue;
@@ -496,7 +501,7 @@ impl PhraseUI {
             }
         }
 
-        if ui.small_button("⬇").clicked() {
+        if ui.small_button(regular::ARROW_DOWN).clicked() {
             for i in (current_row + 1)..chain.rows.len() {
                 let Some(phrase_id) = chain.rows.get(i).and_then(|row| row.phrase) else {
                     continue;

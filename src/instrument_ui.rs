@@ -74,6 +74,10 @@ impl Page for InstrumentUI {
             .feed_state(ui.input(|i| i.time), &self.local_state);
     }
 
+    fn heading(&self, state: &AppUIState) -> String {
+        format!("Instrument {}", state.viewed_instrument.unwrap_or_default())
+    }
+
     fn draw_side_buttons(&mut self, _ui: &mut Ui, _state: &mut AppUIState, _project: &Project) {}
 
     fn handle_undo(&mut self, _project: &Project) {

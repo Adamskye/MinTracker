@@ -1,7 +1,9 @@
 use eframe::egui::{self, Ui};
 use egui::{Key, RichText};
 
-use crate::{app_preferences::Keybinds, app_ui_state::AppUIState, project::Project, Page};
+use crate::{
+    app_preferences::Colours, app_ui_state::AppUIState, keybinds::Keybinds, project::Project, Page,
+};
 
 type RebindFunc = Box<dyn Fn(Keybinds, Key) -> Keybinds>;
 
@@ -10,12 +12,13 @@ enum Tab {
     #[default]
     General,
     Keybinds,
+    Colours,
 }
 
 #[derive(Default)]
 pub struct PreferencesUI {
     current_tab: Tab,
-    recording_key: Option<Box<dyn Fn(Keybinds, Key) -> Keybinds>>,
+    recording_key: Option<RebindFunc>,
 }
 
 impl Page for PreferencesUI {
@@ -26,21 +29,34 @@ impl Page for PreferencesUI {
         }
 
         // use selectable labels to simulate tabs
-        let tabs = [Tab::General, Tab::Keybinds];
+        let tabs = [Tab::General, Tab::Keybinds, Tab::Colours];
         ui.horizontal(|ui| {
             for tab in tabs {
-                ui.selectable_label(self.current_tab == tab, format!("{tab:?}"))
+                if ui
+                    .selectable_label(self.current_tab == tab, format!("{tab:?}"))
                     .clicked()
-                    .then(|| self.current_tab = tab);
+                {
+                    self.current_tab = tab
+                }
             }
         });
 
-        ui.separator();
+        // the following scrollarea should take all the remaining space
 
-        match self.current_tab {
-            Tab::General => self.general_tab(ui, ui_state),
-            Tab::Keybinds => self.keybinds_tab(ui, ui_state),
-        }
+        egui::ScrollArea::both().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| match self.current_tab {
+                    Tab::General => self.general_tab(ui, ui_state),
+                    Tab::Keybinds => self.keybinds_tab(ui, ui_state),
+                    Tab::Colours => self.colours_tab(ui, ui_state),
+                });
+            });
+            ui.allocate_space(ui.available_size());
+        });
+    }
+
+    fn heading(&self, _: &AppUIState) -> String {
+        "Preferences".into()
     }
 
     fn draw_side_buttons(&mut self, _ui: &mut Ui, _state: &mut AppUIState, _project: &Project) {}
@@ -127,12 +143,21 @@ impl PreferencesUI {
                             ..kb
                         }),
                     ),
+                    (
+                        "Trigger Cell",
+                        kb.trigger_cell,
+                        Box::new(|kb, trigger_cell| Keybinds { trigger_cell, ..kb }),
+                    ),
                 ];
 
                 for (action_name, key, rebind_func) in rows {
                     self.keybind_row(ui, action_name, key, rebind_func);
                 }
             });
+
+        if ui.button("Reset to Default").clicked() {
+            ui_state.modify_preferences(|prefs| prefs.keybinds = Keybinds::default())
+        }
     }
 
     fn keybind_row(
@@ -172,6 +197,48 @@ impl PreferencesUI {
         ui.label(RichText::new("Press a key...").italics());
         if ui.button("Cancel").clicked() {
             self.recording_key = None;
+        }
+    }
+
+    fn colours_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
+        egui::Grid::new("colours_grid")
+            .num_columns(2)
+            .spacing([40.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                let mut colours = ui_state.app_preferences().colours.clone();
+
+                ui.label(RichText::new("Element").heading());
+                ui.label(RichText::new("Colour").heading());
+                ui.end_row();
+
+                // text
+                ui.label("Text");
+                ui.color_edit_button_srgb(&mut colours.text);
+                ui.end_row();
+
+                // button
+                ui.label("Button BG");
+                ui.color_edit_button_srgb(&mut colours.button_bg);
+                ui.end_row();
+
+                // window
+                ui.label("Window BG");
+                ui.color_edit_button_srgb(&mut colours.window_bg);
+                ui.end_row();
+
+                // highlight
+                ui.label("Highlight");
+                ui.color_edit_button_srgb(&mut colours.highlighted);
+                ui.end_row();
+
+                if colours != ui_state.app_preferences().colours {
+                    ui_state.modify_preferences(|prefs| prefs.colours = colours);
+                }
+            });
+
+        if ui.button("Reset to Default").clicked() {
+            ui_state.modify_preferences(|prefs| prefs.colours = Colours::default())
         }
     }
 }

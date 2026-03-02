@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use egui::Color32;
+
 use crate::project::MID_A_FREQUENCY;
 
 pub fn linear_interpolate<T>(arr: &[T], index: f32) -> T
@@ -31,4 +33,8 @@ pub fn frequency_from_semitone(semitone: f32) -> f32 {
     let diff = semitone - 57.0;
     let ratio = 2.0_f32.powf(1.0 / 12.0);
     MID_A_FREQUENCY * ratio.powf(diff)
+}
+
+pub fn to_colour32(arr: [u8; 3]) -> Color32 {
+    Color32::from_rgb(arr[0], arr[1], arr[2])
 }

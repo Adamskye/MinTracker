@@ -2,7 +2,7 @@ use eframe::egui::{
     self, Align, Color32, Direction, Id, Layout, Rect, Sense, Stroke, Ui, UiBuilder,
 };
 
-use crate::{project::Project, AppUIState};
+use crate::{helpers::to_colour32, project::Project, AppUIState};
 
 pub struct CellGrid<T, G>
 where
@@ -10,8 +10,8 @@ where
 {
     num_rows: usize,
     num_columns: usize,
-    selected_row: usize,
-    selected_col: usize,
+    highlighted_row: usize,
+    highlighted_col: usize,
 
     grid: Vec<Vec<T>>,
 
@@ -26,8 +26,8 @@ where
         Self {
             num_rows,
             num_columns,
-            selected_row: 0,
-            selected_col: 0,
+            highlighted_row: 0,
+            highlighted_col: 0,
             grid: vec![vec![T::default(); num_columns]; num_rows],
             _marker: std::marker::PhantomData,
         }
@@ -41,12 +41,12 @@ where
         self.num_columns
     }
 
-    pub fn selected_row(&self) -> usize {
-        self.selected_row
+    pub fn highlighted_row(&self) -> usize {
+        self.highlighted_row
     }
 
-    pub fn selected_col(&self) -> usize {
-        self.selected_col
+    pub fn highlighted_col(&self) -> usize {
+        self.highlighted_col
     }
 
     pub fn set_num_rows(&mut self, num_rows: usize) {
@@ -62,12 +62,12 @@ where
         }
     }
 
-    pub fn set_selected_row(&mut self, selected_row: usize) {
-        self.selected_row = selected_row.clamp(0, self.num_rows - 1);
+    pub fn set_highlighted_row(&mut self, selected_row: usize) {
+        self.highlighted_row = selected_row.clamp(0, self.num_rows - 1);
     }
 
-    pub fn set_selected_col(&mut self, selected_col: usize) {
-        self.selected_col = selected_col.clamp(0, self.num_columns - 1);
+    pub fn set_highlighted_col(&mut self, selected_col: usize) {
+        self.highlighted_col = selected_col.clamp(0, self.num_columns - 1);
     }
 
     pub fn get(&self, row: usize, column: usize) -> Option<&T> {
@@ -108,9 +108,18 @@ pub trait CellData<G> {
         _project: &Project,
     ) {
     }
-    fn selected(&self, _grid_state: &mut G, _state: &mut AppUIState, _project: &Project) {}
 
-    fn selectable(&self) -> bool {
+    /// extra action to perform when double clicked or trigger button is pressed when this cell is
+    /// highlighted.
+    /// By default, will call self.on_click(...)
+    fn trigger_action(&self, grid_state: &mut G, state: &mut AppUIState, project: &Project) {
+        self.on_click(grid_state, state, project);
+    }
+
+    /// extra action to perform when single-clicked
+    fn on_click(&self, _grid_state: &mut G, _state: &mut AppUIState, _project: &Project) {}
+
+    fn highlightable(&self) -> bool {
         true
     }
 }
@@ -146,61 +155,70 @@ pub fn cells<T, G>(
         return;
     }
 
-    // correcting selected row and column if they are over a cell that can't be selected
+    // correcting highlighted row and column if they are over a cell that can't be highlighted
     if env
-        .get(env.selected_row(), env.selected_col())
-        .is_some_and(|cell| !cell.selectable())
+        .get(env.highlighted_row(), env.highlighted_col())
+        .is_some_and(|cell| !cell.highlightable())
     {
         for column in 0..env.num_columns() {
             for row in 0..env.num_rows() {
-                if env.get(row, column).is_some_and(|cell| cell.selectable()) {
-                    env.set_selected_row(row);
-                    env.set_selected_col(column);
+                if env
+                    .get(row, column)
+                    .is_some_and(|cell| cell.highlightable())
+                {
+                    env.set_highlighted_row(row);
+                    env.set_highlighted_col(column);
                     break;
                 }
             }
         }
     }
 
-    if env.selected_row() >= env.num_rows() {
-        env.set_selected_row(env.num_rows().saturating_sub(1));
+    if env.highlighted_row() >= env.num_rows() {
+        env.set_highlighted_row(env.num_rows().saturating_sub(1));
     }
 
-    let mut should_scroll_to_selected = false;
+    let mut should_scroll_to_highlighted = false;
 
+    // handle keyboard input
     ui.input(|i| {
-        let mut new_row = env.selected_row();
-        let mut new_col = env.selected_col();
+        if i.key_pressed(state.app_preferences().keybinds.trigger_cell) {
+            if let Some(cell) = env.get(env.highlighted_row(), env.highlighted_col()) {
+                cell.trigger_action(grid_state, state, project);
+                return;
+            }
+        }
+
+        let mut new_row = env.highlighted_row();
+        let mut new_col = env.highlighted_col();
         let prefs = state.app_preferences();
         if i.key_pressed(prefs.keybinds.right) {
-            new_col = env.selected_col() + 1;
-            should_scroll_to_selected = true;
+            new_col = env.highlighted_col() + 1;
+            should_scroll_to_highlighted = true;
         }
         if i.key_pressed(prefs.keybinds.left) {
-            new_col = env.selected_col().saturating_sub(1);
-            should_scroll_to_selected = true;
+            new_col = env.highlighted_col().saturating_sub(1);
+            should_scroll_to_highlighted = true;
         }
         if i.key_pressed(prefs.keybinds.down) {
-            new_row = env.selected_row() + 1;
-            should_scroll_to_selected = true;
+            new_row = env.highlighted_row() + 1;
+            should_scroll_to_highlighted = true;
         }
         if i.key_pressed(prefs.keybinds.up) {
-            new_row = env.selected_row().saturating_sub(1);
-            should_scroll_to_selected = true;
+            new_row = env.highlighted_row().saturating_sub(1);
+            should_scroll_to_highlighted = true;
         }
 
-        if env
-            .get(new_row, new_col)
-            .is_some_and(|cell| !cell.selectable())
-        {
-            return;
-        }
+        if new_row != env.highlighted_row() || new_col != env.highlighted_col() {
+            // get cell at this new position
+            let Some(cell) = env.get(new_row, new_col) else {
+                return;
+            };
 
-        if new_row != env.selected_row() {
-            env.set_selected_row(new_row);
-        }
-        if new_col != env.selected_col() {
-            env.set_selected_col(new_col);
+            if cell.highlightable() {
+                env.set_highlighted_row(new_row);
+                env.set_highlighted_col(new_col);
+            }
         }
     });
 
@@ -212,13 +230,7 @@ pub fn cells<T, G>(
             let id = Id::new((ui.id(), row, column));
             let response = ui.interact(cell_rect, id, Sense::click());
 
-            let stroke = if row == env.selected_row() && column == env.selected_col() {
-                Stroke::new(2.0, Color32::YELLOW)
-            } else if response.hovered() || response.is_pointer_button_down_on() {
-                Stroke::new(2.0, Color32::LIGHT_GRAY)
-            } else {
-                Stroke::new(1.0, Color32::GRAY)
-            };
+            let sel_col = state.app_preferences().colours.highlighted;
 
             let Some(cell_data) = env.get(row, column) else {
                 continue;
@@ -228,7 +240,17 @@ pub fn cells<T, G>(
             let painter = ui.painter();
             let text = cell_data.text();
             if let Some(text) = &text {
-                painter.rect_stroke(cell_rect, 1.0, stroke, egui::StrokeKind::Inside);
+                if row == env.highlighted_row() && column == env.highlighted_col() {
+                    // highlighted
+                    let stroke = Stroke::new(2.0, to_colour32(sel_col));
+                    painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
+                } else if response.hovered() || response.is_pointer_button_down_on() {
+                    // mouse over
+                    let stroke =
+                        Stroke::new(2.0, to_colour32(state.app_preferences().colours.button_bg));
+                    painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
+                }
+
                 painter.text(
                     cell_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -247,10 +269,10 @@ pub fn cells<T, G>(
                 );
             }
 
-            // scroll to the selected cell if it was changed by keyboard input
-            if should_scroll_to_selected
-                && row == env.selected_row()
-                && column == env.selected_col()
+            // scroll to the highlighted cell if it was changed by keyboard input
+            if should_scroll_to_highlighted
+                && row == env.highlighted_row()
+                && column == env.highlighted_col()
             {
                 ui.scroll_to_rect(cell_rect, Some(Align::Center));
             }
@@ -262,15 +284,21 @@ pub fn cells<T, G>(
                 cell_data.context_menu(ui, grid_state, state, project);
             });
 
+            if response.clicked() {
+                cell_data.on_click(grid_state, state, project);
+            }
+
             // clicking and double clicking
             if response.double_clicked()
-                && env.selected_row() == row
-                && env.selected_col() == column
+                && env.highlighted_row() == row
+                && env.highlighted_col() == column
             {
-                cell_data.selected(grid_state, state, project);
-            } else if (response.clicked() || context_menu_opened) && cell_data.selectable() {
-                env.set_selected_row(row);
-                env.set_selected_col(column);
+                // trigger cell action
+                cell_data.trigger_action(grid_state, state, project);
+            } else if (response.clicked() || context_menu_opened) && cell_data.highlightable() {
+                // highlighting due to click
+                env.set_highlighted_row(row);
+                env.set_highlighted_col(column);
             }
         }
     }

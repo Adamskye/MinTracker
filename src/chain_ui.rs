@@ -7,6 +7,7 @@ use eframe::{
     },
     epaint::{Color32, Stroke},
 };
+use egui_phosphor::regular;
 
 use crate::{
     project::{Chain, ChainRow, Project, ProjectEvent, ProjectLocation, ROWS_PER_PHRASE},
@@ -153,6 +154,10 @@ impl Page for ChainUI {
         };
 
         state.player.play(project, scope);
+    }
+
+    fn heading(&self, state: &AppUIState) -> String {
+        format!("Chain {}", state.viewed_chain.unwrap_or_default())
     }
 }
 
@@ -551,7 +556,7 @@ impl ChainUI {
             return;
         };
 
-        if ui.small_button("⬆").clicked() {
+        if ui.small_button(regular::ARROW_UP).clicked() {
             for i in (0..current_row).rev() {
                 let Some(chain_id) = track.chains.get(i) else {
                     continue;
@@ -563,7 +568,7 @@ impl ChainUI {
             }
         }
 
-        if ui.small_button("⬇").clicked() {
+        if ui.small_button(regular::ARROW_DOWN).clicked() {
             for i in (current_row + 1)..track.chains.len() {
                 let Some(Some(chain_id)) = track.chains.get(i) else {
                     continue;

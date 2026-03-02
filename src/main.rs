@@ -10,10 +10,11 @@ use crate::{
 };
 use chain_ui::ChainUI;
 use eframe::{
-    egui::{self, Button, Color32, DragValue, Key, Separator, Ui, ViewportCommand},
+    egui::{self, Button, DragValue, Key, Separator, Ui, ViewportCommand},
     App,
 };
-use egui::{Align, Layout, Vec2};
+use egui::{Align, Layout, RichText, Vec2};
+use egui_phosphor::regular;
 use instrument_ui::InstrumentUI;
 use phrase_ui::PhraseUI;
 use project::{Project, ProjectEvent, ProjectSettings};
@@ -27,6 +28,7 @@ mod effects_menu;
 mod file_handling;
 mod helpers;
 mod instrument_ui;
+mod keybinds;
 mod phrase_ui;
 mod preferences_ui;
 mod project;
@@ -48,10 +50,38 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "Lekton-Regular".to_string(),
+                egui::FontData::from_static(include_bytes!("../assets/Lekton-Regular.ttf")).into(),
+            );
+            fonts.font_data.insert(
+                "VT323".to_string(),
+                egui::FontData::from_static(include_bytes!("../assets/Lekton-Italic.ttf")).into(),
+            );
+            fonts.font_data.insert(
+                "Lekton-Bold".to_string(),
+                egui::FontData::from_static(include_bytes!("../assets/Lekton-Bold.ttf")).into(),
+            );
+            fonts.font_data.insert(
+                "Lekton-Italic".to_string(),
+                egui::FontData::from_static(include_bytes!("../assets/Lekton-Italic.ttf")).into(),
+            );
+
+            fonts.families.insert(
+                egui::FontFamily::Proportional,
+                vec!["Lekton-Regular".into()],
+            );
+            fonts.families.insert(
+                egui::FontFamily::Name("Bold".into()),
+                vec!["Lekton-Bold".into()],
+            );
+            fonts.families.insert(
+                egui::FontFamily::Name("Italic".into()),
+                vec!["Lekton-Italic".into()],
+            );
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
             cc.egui_ctx.set_fonts(fonts);
-
             Ok(Box::<MinTracker>::default())
         }),
     )
@@ -62,6 +92,7 @@ trait Page {
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
     fn handle_undo(&mut self, project: &Project);
     fn play(&self, _state: &AppUIState, _project: ROProject) {}
+    fn heading(&self, _state: &AppUIState) -> String;
 }
 
 struct MinTracker {
@@ -140,6 +171,10 @@ impl App for MinTracker {
             }
 
             egui::CentralPanel::default().show(ctx, |ui| {
+                self.ui_state
+                    .app_preferences()
+                    .colours
+                    .apply(&self.ui_state, ctx);
                 Self::set_style(ui);
                 self.handle_global_keybinds(ui);
 
@@ -288,6 +323,19 @@ impl MinTracker {
             }
         });
 
+        ui.horizontal(|ui| {
+            if ui
+                .selectable_label(
+                    self.ui_state.current_page == PageID::Preferences,
+                    regular::SLIDERS,
+                )
+                .on_hover_text("Preferences")
+                .clicked()
+            {
+                self.ui_state.current_page = PageID::Preferences
+            }
+        });
+
         ui.add_sized([10.0, 10.0], Separator::default().horizontal());
 
         let proj = self.project.read().unwrap();
@@ -332,11 +380,22 @@ impl MinTracker {
         };
 
         ui.horizontal(|ui| {
-            if player_active && !is_paused && ui.small_button("⏸").clicked() {
+            if player_active
+                && !is_paused
+                && ui
+                    .small_button(regular::PAUSE)
+                    .on_hover_text("Pause")
+                    .clicked()
+            {
                 self.ui_state.player.send_command(PlayerCmd::Pause);
             }
 
-            if (!player_active || is_paused) && ui.small_button("⏵").clicked() {
+            if (!player_active || is_paused)
+                && ui
+                    .small_button(regular::PLAY)
+                    .on_hover_text("Play")
+                    .clicked()
+            {
                 if player_active {
                     self.ui_state.player.send_command(PlayerCmd::Resume);
                 } else {
@@ -344,19 +403,16 @@ impl MinTracker {
                 }
             }
 
-            if ui.small_button("⏹").clicked() {
+            if ui
+                .add_enabled(player_active, Button::new(regular::STOP).small())
+                .on_hover_text("Stop")
+                .clicked()
+            {
                 self.ui_state.player.send_command(PlayerCmd::Stop);
             }
 
-            let loop_button = Button::new("🔁").small();
-            if ui
-                .add(if settings.loop_player {
-                    loop_button.fill(Color32::LIGHT_BLUE)
-                } else {
-                    loop_button
-                })
-                .clicked()
-            {
+            let loop_button = Button::selectable(settings.loop_player, regular::REPEAT).small();
+            if ui.add(loop_button).clicked() {
                 proj.push_event(ProjectEvent::UpdateSettings(ProjectSettings {
                     loop_player: !settings.loop_player,
                     ..settings.clone()
@@ -380,12 +436,7 @@ impl MinTracker {
             ("Phrases", PageID::Phrase),
             ("Instruments", PageID::Instrument),
         ];
-        let pages2 = [("Preferences", PageID::Preferences)];
 
-        for (label, page_id) in pages2.into_iter().rev() {
-            ui.selectable_value(&mut self.ui_state.current_page, page_id, label);
-        }
-        ui.add_sized([10.0, 10.0], Separator::default().horizontal());
         for (label, page_id) in pages.into_iter().rev() {
             ui.selectable_value(&mut self.ui_state.current_page, page_id, label);
         }
@@ -398,31 +449,10 @@ impl MinTracker {
             page.handle_undo(&self.project.read().unwrap());
         }
 
-        ui.heading(format!(
-            "{} {}",
-            self.ui_state.current_page.str(),
-            match self.ui_state.current_page {
-                PageID::Track => "".to_string(),
-                PageID::Chain => self
-                    .ui_state
-                    .viewed_chain
-                    .map(|x| x.to_string())
-                    .unwrap_or_default(),
-                PageID::Phrase => self
-                    .ui_state
-                    .viewed_phrase
-                    .map(|x| x.to_string())
-                    .unwrap_or_default(),
-                PageID::Instrument => self
-                    .ui_state
-                    .viewed_instrument
-                    .map(|x| x.to_string())
-                    .unwrap_or_default(),
-                PageID::Preferences => {
-                    "".to_string()
-                }
-            }
-        ));
+        ui.heading(
+            RichText::new(page.heading(&self.ui_state))
+                .family(egui::FontFamily::Name("Bold".into())),
+        );
         ui.separator();
 
         page.update(ui, &mut self.ui_state, &self.project.read().unwrap());
