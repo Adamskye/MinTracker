@@ -7,9 +7,10 @@ use eframe::egui::{
 };
 
 use crate::{
+    page::Page,
     project::{Instrument, InstrumentDataTable, Note, Project, ProjectEvent, NUM_SEMITONES},
     widget::{adsr_graph, waveform_graph::WaveformGraph},
-    AppUIState, Page,
+    AppUIState,
 };
 
 #[derive(PartialEq, Clone)]

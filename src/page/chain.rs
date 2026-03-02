@@ -10,10 +10,11 @@ use eframe::{
 use egui_phosphor::regular;
 
 use crate::{
+    page::{Page, PageID},
     project::{Chain, ChainRow, Project, ProjectEvent, ProjectLocation, ROWS_PER_PHRASE},
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, PlayerScope, ROProject},
-    AppUIState, Page, PageID,
+    AppUIState,
 };
 
 type Clipboard = Vec<ChainRow>;

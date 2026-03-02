@@ -1,16 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{app_preferences::AppPreferences, synth::Player};
-
-#[derive(Clone, Copy, Default, PartialEq)]
-pub enum PageID {
-    #[default]
-    Track,
-    Chain,
-    Phrase,
-    Instrument,
-    Preferences,
-}
+use crate::{app_preferences::AppPreferences, page::PageID, synth::Player};
 
 #[derive(Default)]
 pub struct AppUIState {

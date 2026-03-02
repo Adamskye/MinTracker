@@ -2,7 +2,8 @@ use eframe::egui::{self, Ui};
 use egui::{Key, RichText};
 
 use crate::{
-    app_preferences::Colours, app_ui_state::AppUIState, keybinds::Keybinds, project::Project, Page,
+    app_preferences::Colours, app_ui_state::AppUIState, keybinds::Keybinds, page::Page,
+    project::Project,
 };
 
 type RebindFunc = Box<dyn Fn(Keybinds, Key) -> Keybinds>;

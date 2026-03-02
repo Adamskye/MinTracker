@@ -5,36 +5,28 @@ use std::{
 };
 
 use crate::{
-    app_ui_state::{AppUIState, PageID},
-    preferences_ui::PreferencesUI,
+    app_ui_state::AppUIState,
+    page::{PageID, Pages},
 };
-use chain_ui::ChainUI;
 use eframe::{
     egui::{self, Button, DragValue, Key, Separator, Ui, ViewportCommand},
     App,
 };
 use egui::{Align, Layout, RichText, Vec2};
 use egui_phosphor::regular;
-use instrument_ui::InstrumentUI;
-use phrase_ui::PhraseUI;
 use project::{Project, ProjectEvent, ProjectSettings};
 use synth::{PlayerCmd, ROProject};
-use track_ui::TrackUI;
 
 mod app_preferences;
 mod app_ui_state;
-mod chain_ui;
 mod effects_menu;
 mod file_handling;
 mod helpers;
-mod instrument_ui;
 mod keybinds;
-mod phrase_ui;
-mod preferences_ui;
+mod page;
 mod project;
 mod selection;
 mod synth;
-mod track_ui;
 mod widget;
 
 fn main() -> eframe::Result {
@@ -87,51 +79,14 @@ fn main() -> eframe::Result {
     )
 }
 
-trait Page {
-    fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
-    fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
-    fn handle_undo(&mut self, project: &Project);
-    fn play(&self, _state: &AppUIState, _project: ROProject) {}
-    fn heading(&self, _state: &AppUIState) -> String;
-}
-
 struct MinTracker {
     ui_state: AppUIState,
     project: Arc<RwLock<Project>>,
 
-    track_ui: Box<dyn Page>,
-    chain_ui: Box<dyn Page>,
-    phrase_ui: Box<dyn Page>,
-    instrument_ui: Box<dyn Page>,
-
-    preferences_ui: Box<dyn Page>,
+    pages: Pages,
 
     show_exit_dialog: bool,
     force_close: bool,
-}
-
-macro_rules! get_page_box_mut {
-    ($mintracker:ident, $page_id:expr) => {
-        match $page_id {
-            PageID::Track => &mut $mintracker.track_ui,
-            PageID::Chain => &mut $mintracker.chain_ui,
-            PageID::Phrase => &mut $mintracker.phrase_ui,
-            PageID::Instrument => &mut $mintracker.instrument_ui,
-            PageID::Preferences => &mut $mintracker.preferences_ui,
-        }
-    };
-}
-
-macro_rules! get_page_box {
-    ($mintracker:ident, $page_id:expr) => {
-        match $page_id {
-            PageID::Track => &$mintracker.track_ui,
-            PageID::Chain => &$mintracker.chain_ui,
-            PageID::Phrase => &$mintracker.phrase_ui,
-            PageID::Instrument => &$mintracker.instrument_ui,
-            PageID::Preferences => &$mintracker.preferences_ui,
-        }
-    };
 }
 
 impl Default for MinTracker {
@@ -140,11 +95,7 @@ impl Default for MinTracker {
             ui_state: AppUIState::new(),
             project: Default::default(),
 
-            track_ui: Box::<TrackUI>::default(),
-            chain_ui: Box::<ChainUI>::default(),
-            phrase_ui: Box::<PhraseUI>::default(),
-            instrument_ui: Box::<InstrumentUI>::default(),
-            preferences_ui: Box::<PreferencesUI>::default(),
+            pages: Pages::new(),
 
             show_exit_dialog: false,
             force_close: false,
@@ -422,11 +373,9 @@ impl MinTracker {
 
         ui.add_sized([10.0, 10.0], Separator::default().horizontal());
 
-        get_page_box_mut!(self, self.ui_state.current_page).draw_side_buttons(
-            ui,
-            &mut self.ui_state,
-            &proj,
-        );
+        self.pages
+            .page_mut(self.ui_state.current_page)
+            .draw_side_buttons(ui, &mut self.ui_state, &proj);
     }
 
     fn pages_panel(&mut self, ui: &mut Ui) {
@@ -443,7 +392,7 @@ impl MinTracker {
     }
 
     fn update_page(&mut self, ui: &mut Ui) {
-        let page = get_page_box_mut!(self, self.ui_state.current_page);
+        let page = self.pages.page_mut(self.ui_state.current_page);
 
         if ui.input(|i| i.key_pressed(Key::Z) && i.modifiers.ctrl) {
             page.handle_undo(&self.project.read().unwrap());
@@ -512,7 +461,7 @@ impl MinTracker {
     }
 
     fn play_viewed(&self) {
-        let page = get_page_box!(self, self.ui_state.current_page);
+        let page = self.pages.page(self.ui_state.current_page);
         page.play(&self.ui_state, ROProject::new(self.project.clone()));
     }
 }

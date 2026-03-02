@@ -12,12 +12,13 @@ use egui_phosphor::regular;
 
 use crate::{
     effects_menu::EffectsMenu,
+    page::Page,
     project::{
         Note, Phrase, Project, ProjectEvent, ProjectLocation, MID_A_SEMITONE, ROWS_PER_PHRASE,
     },
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, PlayerScope, ROProject},
-    AppUIState, Page,
+    AppUIState,
 };
 
 type Clipboard = Vec<Vec<Note>>;

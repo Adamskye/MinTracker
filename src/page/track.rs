@@ -6,11 +6,12 @@ use egui_phosphor::regular;
 use itertools::Itertools;
 
 use crate::{
+    page::{Page, PageID},
     project::{Project, ProjectLocation, Track, CHAINS_PER_TRACK},
     selection::SelectionCoords,
     synth::{PlayerScope, ROProject},
     widget::cells::{self, CellData, CellGrid},
-    AppUIState, Page, PageID, ProjectEvent,
+    AppUIState, ProjectEvent,
 };
 
 type Clipboard = Vec<Vec<Option<u32>>>;
@@ -122,17 +123,14 @@ impl CellData<TrackUIGridState> for TrackCellData {
         _state: &mut AppUIState,
         _project: &Project,
     ) {
-        match self {
-            TrackCellData::TrackOptionsButton { track_index } => {
-                // open track settings
-                grid_state.track_opened_settings =
-                    if grid_state.track_opened_settings == Some(*track_index) {
-                        None
-                    } else {
-                        Some(*track_index)
-                    };
-            }
-            _ => {}
+        // open track settings
+        if let TrackCellData::TrackOptionsButton { track_index } = self {
+            grid_state.track_opened_settings =
+                if grid_state.track_opened_settings == Some(*track_index) {
+                    None
+                } else {
+                    Some(*track_index)
+                };
         }
     }
 }
