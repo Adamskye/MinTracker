@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     fs::File,
     sync::{mpsc, Arc, RwLock},
 };
@@ -14,6 +13,7 @@ use eframe::{
 };
 use egui::{Align, Layout, RichText, Vec2};
 use egui_phosphor::regular;
+use egui_toast::ToastKind;
 use project::{Project, ProjectEvent, ProjectSettings};
 use synth::{PlayerCmd, ROProject};
 
@@ -107,9 +107,17 @@ impl App for MinTracker {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         subsecond::call(|| {
             {
-                let changed = self.project.write().unwrap().handle_events();
+                let (changed, messages) = self.project.write().unwrap().handle_events();
                 if changed {
                     self.ui_state.project_dirty = true;
+                }
+
+                // for msg in messages {
+                //     self.ui_state.toasts.info(msg);
+                // }
+
+                for msg in messages {
+                    self.ui_state.add_toast(ToastKind::Info, msg);
                 }
             }
 
@@ -118,7 +126,7 @@ impl App for MinTracker {
             ctx.set_pixels_per_point(pix_per_point);
 
             if self.ui_state.player.is_playing() {
-                ctx.request_repaint();
+                ctx.request_repaint()
             }
 
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -140,6 +148,8 @@ impl App for MinTracker {
                         ui.allocate_space(ui.available_size());
                     });
                 });
+
+                self.ui_state.show_toasts(ui);
             });
 
             if ctx.input(|i| i.viewport().close_requested())
@@ -191,10 +201,10 @@ impl MinTracker {
         // handle save and load,
         ui.input(|i| {
             if i.key_pressed(Key::S) && i.modifiers.ctrl {
-                let _ = self.save();
+                self.save()
             }
             if i.key_pressed(Key::O) && i.modifiers.ctrl {
-                let _ = self.load();
+                self.load()
             }
         });
     }
@@ -206,7 +216,7 @@ impl MinTracker {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
-                        let _ = self.save();
+                        self.save();
                         self.show_exit_dialog = false;
                         ctx.send_viewport_cmd(ViewportCommand::Close);
                     }
@@ -238,30 +248,15 @@ impl MinTracker {
                 .on_hover_text("Open")
                 .clicked()
             {
-                loop {
-                    let res = self.load();
-                    if let Err(e) = res {
-                        eprintln!("Error: {}", e);
-                    } else {
-                        break;
-                    }
-                }
+                self.load()
             }
             if ui
                 .button(egui_phosphor::regular::FLOPPY_DISK)
                 .on_hover_text("Save")
                 .clicked()
             {
-                loop {
-                    let res = self.save();
-                    if let Err(e) = res {
-                        eprintln!("Error: {}", e);
-                    } else {
-                        break;
-                    }
-                }
+                self.save()
             }
-
             if ui
                 .button(egui_phosphor::regular::BROOM)
                 .on_hover_text("Clean Project")
@@ -270,7 +265,7 @@ impl MinTracker {
                 self.project
                     .read()
                     .unwrap()
-                    .push_event(ProjectEvent::CleanUnusedNotes);
+                    .push_event(ProjectEvent::CleanUnusedNotes)
             }
         });
 
@@ -407,7 +402,8 @@ impl MinTracker {
         page.update(ui, &mut self.ui_state, &self.project.read().unwrap());
     }
 
-    fn save(&mut self) -> Result<(), Box<dyn Error>> {
+    fn save(&mut self) {
+        // if no file is currently loaded
         if self.ui_state.filepath.is_none() {
             let new_filepath = rfd::FileDialog::new()
                 .add_filter("cbor", &["cbor"])
@@ -418,38 +414,58 @@ impl MinTracker {
                 });
 
             if new_filepath.is_none() {
-                return Ok(());
+                self.ui_state.add_toast(ToastKind::Error, "Save cancelled");
+                return;
             }
 
             self.ui_state.filepath = new_filepath;
         }
 
-        let Some(path) = &self.ui_state.filepath else {
-            return Ok(());
-        };
-
-        let file = File::create(path)?;
-
-        serde_cbor::to_writer(file, &self.project)?;
-        self.ui_state.project_dirty = false;
-
-        Ok(())
+        match self
+            .ui_state
+            .filepath
+            .as_ref()
+            .ok_or("Save cancelled".to_string())
+            .and_then(|path| {
+                File::create(path.clone()).map_err(|e| format!("Failed to save project: {e}"))
+            })
+            .and_then(|file| {
+                serde_cbor::to_writer(file, &self.project)
+                    .map_err(|e| format!("Failed to save project: {e}"))
+            }) {
+            Ok(_) => {
+                self.ui_state.project_dirty = false;
+                self.ui_state.add_toast(ToastKind::Success, "Project saved");
+            }
+            Err(e) => self.ui_state.add_toast(ToastKind::Error, e),
+        }
     }
 
-    fn load(&mut self) -> Result<(), Box<dyn Error>> {
+    fn load(&mut self) {
         let Some(path) = rfd::FileDialog::new()
             .add_filter("cbor", &["cbor"])
             .pick_file()
         else {
-            return Ok(());
+            self.ui_state.add_toast(ToastKind::Info, "Load cancelled");
+            return;
         };
 
-        let file = File::open(path.clone())?;
-
-        self.project = Arc::new(RwLock::new(serde_cbor::from_reader(file)?));
-        self.ui_state.filepath = Some(path);
-        self.ui_state.project_dirty = false;
-        Ok(())
+        match File::open(path.clone())
+            .map_err(|e| format!("Failed to open file: {e}"))
+            .and_then(|file| {
+                serde_cbor::from_reader(file).map_err(|e| format!("Failed to parse project: {e}"))
+            }) {
+            Ok(proj) => {
+                self.project = Arc::new(RwLock::new(proj));
+                self.ui_state.filepath = Some(path.clone());
+                self.ui_state.project_dirty = false;
+                self.ui_state
+                    .add_toast(ToastKind::Success, "Project loaded");
+            }
+            Err(e) => {
+                self.ui_state.add_toast(ToastKind::Error, e);
+            }
+        }
     }
 
     fn set_style(ui: &mut Ui) {

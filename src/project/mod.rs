@@ -136,8 +136,9 @@ impl Project {
         &self.effect_presets
     }
 
-    pub fn handle_events(&mut self) -> bool {
+    pub fn handle_events(&mut self) -> (bool, Vec<String>) {
         let mut changed = false;
+        let mut log_messages = Vec::new();
 
         while let Some(event) = {
             let mut ev = self.event.lock().unwrap();
@@ -167,11 +168,11 @@ impl Project {
                 PE::UpdateEffectPreset { id, new_preset } => {
                     self.update_effect_preset(id, new_preset)
                 }
-                PE::CleanUnusedNotes => self.clean_unused_notes(),
+                PE::CleanUnusedNotes => self.clean_unused_notes(&mut log_messages),
             }
         }
 
-        changed
+        (changed, log_messages)
     }
 
     pub fn push_event(&self, event: ProjectEvent) {
@@ -197,7 +198,7 @@ impl Project {
         }
     }
 
-    fn clean_unused_notes(&mut self) {
+    fn clean_unused_notes(&mut self, log_messages: &mut Vec<String>) {
         // clean chains
         let mut chains_to_delete = Vec::new();
         for chain_id in self.chains().keys() {
@@ -218,7 +219,6 @@ impl Project {
         chains_to_delete.into_iter().for_each(|id| {
             self.chains.remove(&id);
         });
-        println!("Deleted {num_chains} chains");
 
         // clean phrases
         let mut phrases_to_delete = Vec::new();
@@ -239,7 +239,10 @@ impl Project {
         phrases_to_delete.into_iter().for_each(|id| {
             self.phrases.remove(&id);
         });
-        println!("Deleted {num_phrases} phrases");
+
+        log_messages.push(format!(
+            "Deleted {num_phrases} unused phrases and {num_chains} unused chains"
+        ));
     }
 
     pub fn get_notes_at_location(&self, location: ProjectLocation) -> Option<Arc<[&Note]>> {
