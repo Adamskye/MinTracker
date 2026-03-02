@@ -13,7 +13,7 @@ enum Tab {
     #[default]
     General,
     Keybinds,
-    Colours,
+    Styling,
 }
 
 #[derive(Default)]
@@ -31,7 +31,7 @@ impl Page for PreferencesUI {
             }
 
             // use selectable labels to simulate tabs
-            let tabs = [Tab::General, Tab::Keybinds, Tab::Colours];
+            let tabs = [Tab::General, Tab::Keybinds, Tab::Styling];
             ui.horizontal(|ui| {
                 for tab in tabs {
                     if ui
@@ -50,7 +50,7 @@ impl Page for PreferencesUI {
                     ui.vertical(|ui| match self.current_tab {
                         Tab::General => self.general_tab(ui, ui_state),
                         Tab::Keybinds => self.keybinds_tab(ui, ui_state),
-                        Tab::Colours => self.style_tab(ui, ui_state),
+                        Tab::Styling => self.style_tab(ui, ui_state),
                     });
                 });
                 ui.allocate_space(ui.available_size());
@@ -213,12 +213,15 @@ impl PreferencesUI {
 
                 // ui scale
                 ui.label("UI Scale");
-                let mut ui_scale = style.ui_scale;
                 egui::ComboBox::from_id_salt("UI Scale")
                     .selected_text(format!("{:.2}", style.ui_scale))
                     .show_ui(ui, |ui| {
                         for scale in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0] {
-                            ui.selectable_value(&mut ui_scale, scale, format!("{:.2}", scale));
+                            ui.selectable_value(
+                                &mut style.ui_scale,
+                                scale,
+                                format!("{:.2}", scale),
+                            );
                         }
                     });
                 ui.end_row();

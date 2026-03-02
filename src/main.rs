@@ -285,7 +285,7 @@ impl MinTracker {
         let proj = self.project.read().unwrap();
         let settings = proj.settings();
 
-        let _ = ui.menu_button("Tempo", |ui| {
+        let _ = ui.menu_button(format!("{} Tempo", regular::METRONOME), |ui| {
             let mut tempo_value = settings.tempo;
             ui.add(DragValue::new(&mut tempo_value).range(1.0..=1000.0));
 
@@ -298,7 +298,7 @@ impl MinTracker {
             }
         });
 
-        let _ = ui.menu_button("Transpose", |ui| {
+        let _ = ui.menu_button(format!("{} Transpose", regular::PIANO_KEYS), |ui| {
             let mut transpose_value = settings.transpose;
             ui.add(DragValue::new(&mut transpose_value));
 

@@ -58,28 +58,26 @@ impl Default for Colours {
 impl Colours {
     fn apply(&self, ctx: &Context) {
         ctx.all_styles_mut(|style| {
-            subsecond::call(|| {
-                style.visuals.override_text_color = Some(to_colour32(self.text));
-                style.text_styles.insert(
-                    TextStyle::Heading,
-                    egui::FontId::new(18.0, FontFamily::Name("Bold".into())),
-                );
+            style.visuals.override_text_color = Some(to_colour32(self.text));
+            style.text_styles.insert(
+                TextStyle::Heading,
+                egui::FontId::new(18.0, FontFamily::Name("Bold".into())),
+            );
 
-                style.text_styles.insert(
-                    TextStyle::Heading,
-                    egui::FontId::new(18.0, FontFamily::Name("Bold".into())),
-                );
+            style.text_styles.insert(
+                TextStyle::Heading,
+                egui::FontId::new(18.0, FontFamily::Name("Bold".into())),
+            );
 
-                style.visuals.widgets.noninteractive.weak_bg_fill = to_colour32(self.button_bg);
-                style.visuals.widgets.inactive.weak_bg_fill = to_colour32(self.button_bg);
-                style.visuals.widgets.hovered.weak_bg_fill = to_colour32(self.button_bg);
-                style.visuals.widgets.active.weak_bg_fill = to_colour32(self.button_bg);
+            style.visuals.widgets.noninteractive.weak_bg_fill = to_colour32(self.button_bg);
+            style.visuals.widgets.inactive.weak_bg_fill = to_colour32(self.button_bg);
+            style.visuals.widgets.hovered.weak_bg_fill = to_colour32(self.button_bg);
+            style.visuals.widgets.active.weak_bg_fill = to_colour32(self.button_bg);
 
-                style.visuals.panel_fill = to_colour32(self.window_bg);
-                style.visuals.striped = true;
+            style.visuals.panel_fill = to_colour32(self.window_bg);
+            style.visuals.striped = true;
 
-                style.visuals.selection.bg_fill = to_colour32(self.highlighted);
-            });
+            style.visuals.selection.bg_fill = to_colour32(self.highlighted);
         });
     }
 }
