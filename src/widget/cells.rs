@@ -187,7 +187,7 @@ pub fn cells<T, G>(
 
     // handle keyboard input
     ui.input(|i| {
-        if i.key_pressed(state.app_preferences().keybinds.trigger_cell) {
+        if i.key_pressed(state.preferences().keybinds.trigger_cell) {
             if let Some(cell) = env.get(env.highlighted_row(), env.highlighted_col()) {
                 cell.trigger_action(grid_state, state, project);
                 return;
@@ -196,7 +196,7 @@ pub fn cells<T, G>(
 
         let mut new_row = env.highlighted_row();
         let mut new_col = env.highlighted_col();
-        let prefs = state.app_preferences();
+        let prefs = state.preferences();
         if i.key_pressed(prefs.keybinds.right) {
             new_col = env.highlighted_col() + 1;
             should_scroll_to_highlighted = true;
@@ -235,7 +235,7 @@ pub fn cells<T, G>(
             let id = Id::new((ui.id(), row, column));
             let response = ui.interact(cell_rect, id, Sense::click());
 
-            let sel_col = state.app_preferences().colours.highlighted;
+            let sel_col = state.preferences().style.colours.highlighted;
 
             let Some(cell_data) = env.get(row, column) else {
                 continue;
@@ -251,8 +251,10 @@ pub fn cells<T, G>(
                     painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
                 } else if response.hovered() || response.is_pointer_button_down_on() {
                     // mouse over
-                    let stroke =
-                        Stroke::new(2.0, to_colour32(state.app_preferences().colours.button_bg));
+                    let stroke = Stroke::new(
+                        2.0,
+                        to_colour32(state.preferences().style.colours.button_bg),
+                    );
                     painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
                 }
 

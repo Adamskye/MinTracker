@@ -4,7 +4,7 @@ use egui::{Align2, WidgetText};
 use egui_phosphor::regular;
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 
-use crate::{app_preferences::AppPreferences, page::PageID, synth::Player};
+use crate::{page::PageID, preferences::Preferences, synth::Player};
 
 #[derive(Default)]
 pub struct AppUIState {
@@ -22,13 +22,13 @@ pub struct AppUIState {
     pub chain_selected_row: Option<usize>,
 
     toasts: Toasts,
-    app_preferences: AppPreferences,
+    app_preferences: Preferences,
 }
 
 impl AppUIState {
     pub fn new() -> Self {
         Self {
-            app_preferences: AppPreferences::load(),
+            app_preferences: Preferences::load(),
             toasts: Toasts::new()
                 .anchor(Align2::RIGHT_TOP, (-10., 10.))
                 .order(egui::Order::Tooltip),
@@ -36,11 +36,11 @@ impl AppUIState {
         }
     }
 
-    pub fn app_preferences(&self) -> &AppPreferences {
+    pub fn preferences(&self) -> &Preferences {
         &self.app_preferences
     }
 
-    pub fn modify_preferences(&mut self, f: impl FnOnce(&mut AppPreferences)) {
+    pub fn modify_preferences(&mut self, f: impl FnOnce(&mut Preferences)) {
         f(&mut self.app_preferences);
         confy::store("mintracker", "config", &self.app_preferences).unwrap();
     }

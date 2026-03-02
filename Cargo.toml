@@ -1,7 +1,7 @@
 [package]
 name = "mintracker"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,6 +11,7 @@ dioxus-devtools = "0.7.3"
 eframe = "0.33.3"
 egui = { version = "0.33.3", features = ["serde"] }
 egui-phosphor = "0.11.0"
+egui-toast = "0.19.1"
 itertools = "0.14.0"
 rfd = "0.17.2"
 rodio = "0.21.1"

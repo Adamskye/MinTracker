@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    sync::{mpsc, Arc, RwLock},
+    sync::{Arc, RwLock, mpsc},
 };
 
 use crate::{
@@ -8,8 +8,8 @@ use crate::{
     page::{PageID, Pages},
 };
 use eframe::{
-    egui::{self, Button, DragValue, Key, Separator, Ui, ViewportCommand},
     App,
+    egui::{self, Button, DragValue, Key, Separator, Ui, ViewportCommand},
 };
 use egui::{Align, Layout, RichText, Vec2};
 use egui_phosphor::regular;
@@ -17,13 +17,14 @@ use egui_toast::ToastKind;
 use project::{Project, ProjectEvent, ProjectSettings};
 use synth::{PlayerCmd, ROProject};
 
-mod app_preferences;
 mod app_ui_state;
 mod effects_menu;
 mod file_handling;
+mod font_styling;
 mod helpers;
 mod keybinds;
 mod page;
+mod preferences;
 mod project;
 mod selection;
 mod synth;
@@ -122,7 +123,7 @@ impl App for MinTracker {
             }
 
             let pix_per_point = ctx.native_pixels_per_point().unwrap_or(1.0)
-                * self.ui_state.app_preferences().ui_scale;
+                * self.ui_state.preferences().style.ui_scale;
             ctx.set_pixels_per_point(pix_per_point);
 
             if self.ui_state.player.is_playing() {
@@ -130,10 +131,7 @@ impl App for MinTracker {
             }
 
             egui::CentralPanel::default().show(ctx, |ui| {
-                self.ui_state
-                    .app_preferences()
-                    .colours
-                    .apply(&self.ui_state, ctx);
+                self.ui_state.preferences().style.apply(ctx);
                 Self::set_style(ui);
                 self.handle_global_keybinds(ui);
 
@@ -170,7 +168,7 @@ impl App for MinTracker {
 impl MinTracker {
     fn handle_global_keybinds(&mut self, ui: &mut Ui) {
         // handle audio
-        if ui.input(|i| i.key_pressed(self.ui_state.app_preferences().keybinds.play_pause)) {
+        if ui.input(|i| i.key_pressed(self.ui_state.preferences().keybinds.play_pause)) {
             if self.ui_state.player.is_playing() {
                 self.ui_state.player.send_command(PlayerCmd::Stop);
             } else {
@@ -180,7 +178,7 @@ impl MinTracker {
 
         // handle page switching
         ui.input(|ui| {
-            let kb = &self.ui_state.app_preferences().keybinds;
+            let kb = &self.ui_state.preferences().keybinds;
             let mut new = None;
             ui.key_pressed(kb.show_tracks)
                 .then(|| new = Some(PageID::Track));

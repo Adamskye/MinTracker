@@ -2,8 +2,8 @@ use eframe::egui::{self, Ui};
 use egui::{Key, RichText};
 
 use crate::{
-    app_preferences::Colours, app_ui_state::AppUIState, keybinds::Keybinds, page::Page,
-    project::Project,
+    app_ui_state::AppUIState, font_styling::FontStylingEx as _, keybinds::Keybinds, page::Page,
+    preferences::Colours, project::Project,
 };
 
 type RebindFunc = Box<dyn Fn(Keybinds, Key) -> Keybinds>;
@@ -24,35 +24,37 @@ pub struct PreferencesUI {
 
 impl Page for PreferencesUI {
     fn update(&mut self, ui: &mut Ui, ui_state: &mut AppUIState, _project: &Project) {
-        if self.recording_key.is_some() {
-            self.recording_keybind(ui, ui_state);
-            return;
-        }
-
-        // use selectable labels to simulate tabs
-        let tabs = [Tab::General, Tab::Keybinds, Tab::Colours];
-        ui.horizontal(|ui| {
-            for tab in tabs {
-                if ui
-                    .selectable_label(self.current_tab == tab, format!("{tab:?}"))
-                    .clicked()
-                {
-                    self.current_tab = tab
-                }
+        subsecond::call(|| {
+            if self.recording_key.is_some() {
+                self.recording_keybind(ui, ui_state);
+                return;
             }
-        });
 
-        // the following scrollarea should take all the remaining space
-
-        egui::ScrollArea::both().show(ui, |ui| {
+            // use selectable labels to simulate tabs
+            let tabs = [Tab::General, Tab::Keybinds, Tab::Colours];
             ui.horizontal(|ui| {
-                ui.vertical(|ui| match self.current_tab {
-                    Tab::General => self.general_tab(ui, ui_state),
-                    Tab::Keybinds => self.keybinds_tab(ui, ui_state),
-                    Tab::Colours => self.colours_tab(ui, ui_state),
-                });
+                for tab in tabs {
+                    if ui
+                        .selectable_label(self.current_tab == tab, format!("{tab:?}"))
+                        .clicked()
+                    {
+                        self.current_tab = tab
+                    }
+                }
             });
-            ui.allocate_space(ui.available_size());
+
+            ui.separator();
+
+            egui::ScrollArea::both().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| match self.current_tab {
+                        Tab::General => self.general_tab(ui, ui_state),
+                        Tab::Keybinds => self.keybinds_tab(ui, ui_state),
+                        Tab::Colours => self.style_tab(ui, ui_state),
+                    });
+                });
+                ui.allocate_space(ui.available_size());
+            });
         });
     }
 
@@ -65,20 +67,7 @@ impl Page for PreferencesUI {
 }
 
 impl PreferencesUI {
-    fn general_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
-        let mut ui_scale = ui_state.app_preferences().ui_scale;
-        egui::ComboBox::from_label("UI Scale")
-            .selected_text(format!("{:.2}", ui_state.app_preferences().ui_scale))
-            .show_ui(ui, |ui| {
-                for scale in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0] {
-                    ui.selectable_value(&mut ui_scale, scale, format!("{:.2}", scale));
-                }
-            });
-
-        if ui_scale != ui_state.app_preferences().ui_scale {
-            ui_state.modify_preferences(|prefs| prefs.ui_scale = ui_scale);
-        }
-    }
+    fn general_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {}
 
     fn keybinds_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
         egui::Grid::new("keybinds_grid")
@@ -86,11 +75,11 @@ impl PreferencesUI {
             .spacing([40.0, 4.0])
             .striped(true)
             .show(ui, |ui| {
-                ui.label(RichText::new("Action").heading());
-                ui.label(RichText::new("Key").heading());
+                ui.label(RichText::new("Action").bold_ex());
+                ui.label(RichText::new("Key").bold_ex());
                 ui.end_row();
 
-                let kb = &ui_state.app_preferences().keybinds;
+                let kb = &ui_state.preferences().keybinds;
                 let rows: [(&str, Key, RebindFunc); _] = [
                     ("Up", kb.up, Box::new(|kb, up| Keybinds { up, ..kb })),
                     (
@@ -201,16 +190,61 @@ impl PreferencesUI {
         }
     }
 
-    fn colours_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
+    fn style_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
+        self.general_styling(ui, ui_state);
+
+        ui.separator();
+
+        self.colours(ui, ui_state);
+    }
+
+    fn general_styling(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
+        ui.label(RichText::new("General Styling").subheading_ex());
+        let mut style = ui_state.preferences().style.clone();
+
+        egui::Grid::new("style_grid")
+            .num_columns(2)
+            .spacing([40.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(RichText::new("Setting").bold_ex());
+                ui.label(RichText::new("Value").bold_ex());
+                ui.end_row();
+
+                // ui scale
+                ui.label("UI Scale");
+                let mut ui_scale = style.ui_scale;
+                egui::ComboBox::from_id_salt("UI Scale")
+                    .selected_text(format!("{:.2}", style.ui_scale))
+                    .show_ui(ui, |ui| {
+                        for scale in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0] {
+                            ui.selectable_value(&mut ui_scale, scale, format!("{:.2}", scale));
+                        }
+                    });
+                ui.end_row();
+
+                // rounded corners
+                ui.label("Rounded Corners");
+                ui.checkbox(&mut style.rounded_corners, "Enabled");
+                ui.end_row();
+            });
+
+        if style != ui_state.preferences().style {
+            ui_state.modify_preferences(|prefs| prefs.style = style);
+        }
+    }
+
+    fn colours(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
+        ui.label(RichText::new("Colours").subheading_ex());
         egui::Grid::new("colours_grid")
             .num_columns(2)
             .spacing([40.0, 4.0])
             .striped(true)
             .show(ui, |ui| {
-                let mut colours = ui_state.app_preferences().colours.clone();
+                let mut colours = ui_state.preferences().style.colours.clone();
 
-                ui.label(RichText::new("Element").heading());
-                ui.label(RichText::new("Colour").heading());
+                ui.label(RichText::new("Element").bold_ex());
+                ui.label(RichText::new("Colour").bold_ex());
                 ui.end_row();
 
                 // text
@@ -233,13 +267,13 @@ impl PreferencesUI {
                 ui.color_edit_button_srgb(&mut colours.highlighted);
                 ui.end_row();
 
-                if colours != ui_state.app_preferences().colours {
-                    ui_state.modify_preferences(|prefs| prefs.colours = colours);
+                if colours != ui_state.preferences().style.colours {
+                    ui_state.modify_preferences(|prefs| prefs.style.colours = colours);
                 }
             });
 
         if ui.button("Reset to Default").clicked() {
-            ui_state.modify_preferences(|prefs| prefs.colours = Colours::default())
+            ui_state.modify_preferences(|prefs| prefs.style.colours = Colours::default())
         }
     }
 }
