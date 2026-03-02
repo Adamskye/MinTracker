@@ -2,7 +2,7 @@ use eframe::egui::{
     self, Align, Color32, Direction, Id, Layout, Rect, Sense, Stroke, Ui, UiBuilder,
 };
 
-use crate::{helpers::to_colour32, project::Project, AppUIState};
+use crate::{AppUIState, helpers::to_colour32, project::Project};
 
 pub struct CellGrid<T, G>
 where
@@ -89,6 +89,7 @@ where
 
 pub trait CellData<G> {
     fn text(&self) -> Option<String>;
+
     fn inner_widget(
         &self,
         _ui: &mut Ui,
@@ -96,6 +97,10 @@ pub trait CellData<G> {
         _state: &mut AppUIState,
         _project: &Project,
     ) {
+    }
+
+    fn has_inner_widget(&self) -> bool {
+        false
     }
 
     #[allow(unused)]
@@ -258,15 +263,11 @@ pub fn cells<T, G>(
                     egui::FontId::default(),
                     Color32::WHITE,
                 );
-            } else {
-                ui.scope_builder(
-                    UiBuilder::new()
-                        .layout(Layout::centered_and_justified(Direction::TopDown))
-                        .max_rect(cell_rect),
-                    |ui| {
-                        cell_data.inner_widget(ui, grid_state, state, project);
-                    },
-                );
+            }
+
+            if cell_data.has_inner_widget() {
+                let mut ui = ui.new_child(UiBuilder::new().max_rect(cell_rect));
+                cell_data.inner_widget(&mut ui, grid_state, state, project);
             }
 
             // scroll to the highlighted cell if it was changed by keyboard input

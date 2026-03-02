@@ -1,3 +1,5 @@
+use std::sync::mpsc;
+
 use eframe::{
     egui::{Button, ComboBox, Context, DragValue, Grid, Key, ScrollArea, Ui, Window},
     epaint::Color32,
@@ -6,12 +8,12 @@ use egui_phosphor::regular;
 use itertools::Itertools;
 
 use crate::{
-    page::{Page, PageID},
-    project::{Project, ProjectLocation, Track, CHAINS_PER_TRACK},
-    selection::SelectionCoords,
-    synth::{PlayerScope, ROProject},
-    widget::cells::{self, CellData, CellGrid},
     AppUIState, ProjectEvent,
+    page::{Page, PageID},
+    project::{CHAINS_PER_TRACK, Project, ProjectLocation, Track},
+    selection::SelectionCoords,
+    synth::{PlayerCmd, PlayerScope, ROProject},
+    widget::cells::{self, CellData, CellGrid},
 };
 
 type Clipboard = Vec<Vec<Option<u32>>>;
@@ -31,6 +33,7 @@ pub enum TrackCellData {
         track_index: usize,
         chain_offset: usize,
         chain_id: Option<u32>,
+        playing: bool,
     },
     TrackOptionsButton {
         track_index: usize,
@@ -44,23 +47,34 @@ impl CellData<TrackUIGridState> for TrackCellData {
 
     fn text(&self) -> Option<String> {
         match self {
+            TrackCellData::Empty => None,
             TrackCellData::ChainButton { chain_id, .. } => Some(
                 chain_id
                     .map(|i| i.to_string())
                     .unwrap_or(regular::MINUS.into()),
             ),
             TrackCellData::TrackOptionsButton { .. } => Some(regular::GEAR_SIX.into()),
-            _ => None,
         }
     }
 
     fn inner_widget(
         &self,
-        _ui: &mut Ui,
+        ui: &mut Ui,
         _grid_state: &mut TrackUIGridState,
         _state: &mut AppUIState,
         _project: &Project,
     ) {
+        if let TrackCellData::ChainButton { playing, .. } = self
+            && *playing
+        {
+            ui.horizontal_centered(|ui| {
+                ui.label(regular::CARET_RIGHT);
+            });
+        }
+    }
+
+    fn has_inner_widget(&self) -> bool {
+        matches!(self, TrackCellData::ChainButton { playing, .. } if *playing)
     }
 
     fn context_menu(
@@ -71,15 +85,15 @@ impl CellData<TrackUIGridState> for TrackCellData {
         project: &Project,
     ) {
         match self {
-            TrackCellData::Empty => {}
-            TrackCellData::TrackOptionsButton { .. } => {}
             TrackCellData::ChainButton {
                 track_index,
                 chain_offset,
-                chain_id: id,
+                chain_id,
+                ..
             } => {
-                Self::context_menu_chain(*track_index, *chain_offset, *id, ui, project);
+                Self::context_menu_chain(*track_index, *chain_offset, *chain_id, ui, project);
             }
+            _ => {}
         }
     }
 
@@ -95,6 +109,7 @@ impl CellData<TrackUIGridState> for TrackCellData {
                 track_index,
                 chain_offset,
                 chain_id,
+                ..
             } => {
                 if let Some(id) = chain_id {
                     // go to chain screen
@@ -264,13 +279,15 @@ impl TrackUI {
     }
 
     fn show_tracks(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        // fetch what is playing
-        //let (tx, rx) = mpsc::channel();
-        //state.player.send_command(PlayerCmd::RequestLocation(tx));
+        // fetch where the player is at
+        let (tx, rx) = mpsc::channel();
+        state.player.send_command(PlayerCmd::RequestLocation(tx));
 
-        //let position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
+        let position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
 
         // update cells state
+
+        // +1 for the option button row
         self.cells_state.set_num_columns(project.tracks().len());
         self.cells_state.set_num_rows(CHAINS_PER_TRACK + 1);
 
@@ -285,6 +302,13 @@ impl TrackUI {
 
         for (track_index, track) in project.tracks().iter().enumerate() {
             for (chain_offset, &chain_id) in track.chains.iter().enumerate() {
+                let playing = position_opt
+                    .as_ref()
+                    .and_then(|positions| positions.get(track_index))
+                    .and_then(|opt| *opt)
+                    .filter(|position| position.chain_offset == chain_offset)
+                    .is_some();
+
                 self.cells_state.set(
                     chain_offset + 1,
                     track_index,
@@ -292,6 +316,7 @@ impl TrackUI {
                         track_index,
                         chain_offset,
                         chain_id,
+                        playing,
                     },
                 );
             }
