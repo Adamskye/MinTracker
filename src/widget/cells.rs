@@ -1,4 +1,5 @@
 use eframe::egui::{self, Align, Color32, Id, Rect, Sense, Stroke, Ui, UiBuilder};
+use egui::{FontId, Pos2};
 
 use crate::{AppUIState, helpers::to_colour32, project::Project};
 
@@ -229,6 +230,10 @@ pub fn cells<T, G>(
         for column in 0..env.num_columns() {
             let cell_rect = rect_from_cell_pos(row, column, cell_size, rect);
 
+            if !ui.is_rect_visible(cell_rect) {
+                continue;
+            }
+
             // interact response
             let id = Id::new((ui.id(), row, column));
             let response = ui.interact(cell_rect, id, Sense::click());
@@ -243,6 +248,7 @@ pub fn cells<T, G>(
             let painter = ui.painter();
             let text = cell_data.text();
             if let Some(text) = &text {
+                // drawing border
                 if row == env.highlighted_row() && column == env.highlighted_col() {
                     // highlighted
                     let stroke = Stroke::new(2.0, to_colour32(sel_col));
@@ -260,7 +266,7 @@ pub fn cells<T, G>(
                     cell_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     text,
-                    egui::FontId::default(),
+                    FontId::default(),
                     Color32::WHITE,
                 );
             }

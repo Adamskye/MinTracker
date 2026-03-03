@@ -5,13 +5,18 @@ use std::{
 
 use crate::{
     app_ui_state::AppUIState,
+    font_styling::FontStylingEx,
+    helpers::to_colour32,
     page::{PageID, Pages},
 };
 use eframe::{
     App,
     egui::{self, Button, DragValue, Key, Separator, Ui, ViewportCommand},
 };
-use egui::{Align, Layout, RichText, Vec2};
+use egui::{
+    Align, Color32, Context, Frame, Layout, Margin, RichText, Sense, Shadow, Stroke, TextFormat,
+    UiBuilder, Vec2, text::LayoutJob,
+};
 use egui_phosphor::regular;
 use egui_toast::ToastKind;
 use project::{Project, ProjectEvent, ProjectSettings};
@@ -113,42 +118,80 @@ impl App for MinTracker {
                     self.ui_state.project_dirty = true;
                 }
 
-                // for msg in messages {
-                //     self.ui_state.toasts.info(msg);
-                // }
-
                 for msg in messages {
                     self.ui_state.add_toast(ToastKind::Info, msg);
                 }
             }
 
-            let pix_per_point = ctx.native_pixels_per_point().unwrap_or(1.0)
-                * self.ui_state.preferences().style.ui_scale;
-            ctx.set_pixels_per_point(pix_per_point);
-
             if self.ui_state.player.is_playing() {
                 ctx.request_repaint()
             }
 
-            egui::CentralPanel::default().show(ctx, |ui| {
-                self.ui_state.preferences().style.apply(ctx);
-                Self::set_style(ui);
-                self.handle_global_keybinds(ui);
+            Self::set_style(&ctx);
+            self.ui_state.preferences().style.apply(ctx);
+            self.handle_global_keybinds(&ctx);
 
-                // main area
-                ui.with_layout(egui::Layout::left_to_right(Align::Min), |ui| {
+            let window_fill = to_colour32(self.ui_state.preferences().style.colours.window_bg);
+            let sidepanel_fill = window_fill.linear_multiply(1.3);
+            let toppanel_fill = window_fill.linear_multiply(1.15);
+
+            let window_margin = self.ui_state.preferences().style.window_margin as i8;
+
+            egui::SidePanel::left("side_panel")
+                .resizable(false)
+                .frame(
+                    Frame::default()
+                        .inner_margin(window_margin)
+                        .fill(sidepanel_fill),
+                )
+                .show_separator_line(true)
+                .show(ctx, |ui| {
                     self.sidepanel(ui);
-                    ui.separator();
+                });
+
+            // ui.heading(
+            //     RichText::new(page.heading(&self.ui_state))
+            //         .family(egui::FontFamily::Name("Bold".into())),
+            // );
+            // //ui.separator();
+            // let window_margin = self.ui_state.preferences().style.window_margin as f32;
+            // ui.add(Separator::default().grow(window_margin));
+            egui::TopBottomPanel::top("top_panel")
+                .resizable(false)
+                .frame(
+                    Frame::default()
+                        .inner_margin(window_margin)
+                        .fill(toppanel_fill),
+                )
+                .show_separator_line(true)
+                .show(ctx, |ui| {
+                    ui.horizontal_centered(|ui| {
+                        let page = self.pages.page_mut(self.ui_state.current_page);
+                        ui.heading(RichText::new(page.heading(&self.ui_state)).bold_ex());
+                    });
+                });
+
+            egui::CentralPanel::default()
+                .frame(
+                    Frame::default()
+                        .inner_margin(window_margin)
+                        .fill(window_fill),
+                )
+                .show(ctx, |ui| {
+                    // main area
+                    //ui.with_layout(egui::Layout::left_to_right(Align::Min), |ui| {
+                    //self.sidepanel(ui);
+                    //ui.separator();
                     ui.vertical(|ui| {
-                        ui.set_width(ui.available_size().x);
+                        //ui.set_width(ui.available_size().x);
                         self.update_page(ui);
 
                         ui.allocate_space(ui.available_size());
                     });
-                });
+                    //});
 
-                self.ui_state.show_toasts(ui);
-            });
+                    self.ui_state.show_toasts(ui);
+                });
 
             if ctx.input(|i| i.viewport().close_requested())
                 && self.ui_state.project_dirty
@@ -166,9 +209,9 @@ impl App for MinTracker {
 }
 
 impl MinTracker {
-    fn handle_global_keybinds(&mut self, ui: &mut Ui) {
+    fn handle_global_keybinds(&mut self, ctx: &Context) {
         // handle audio
-        if ui.input(|i| i.key_pressed(self.ui_state.preferences().keybinds.play_pause)) {
+        if ctx.input(|i| i.key_pressed(self.ui_state.preferences().keybinds.play_pause)) {
             if self.ui_state.player.is_playing() {
                 self.ui_state.player.send_command(PlayerCmd::Stop);
             } else {
@@ -177,7 +220,7 @@ impl MinTracker {
         }
 
         // handle page switching
-        ui.input(|ui| {
+        ctx.input(|ui| {
             let kb = &self.ui_state.preferences().keybinds;
             let mut new = None;
             ui.key_pressed(kb.show_tracks)
@@ -197,7 +240,7 @@ impl MinTracker {
         });
 
         // handle save and load,
-        ui.input(|i| {
+        ctx.input(|i| {
             if i.key_pressed(Key::S) && i.modifiers.ctrl {
                 self.save()
             }
@@ -208,26 +251,48 @@ impl MinTracker {
     }
 
     fn exit_dialog(&mut self, ctx: &egui::Context) {
-        egui::Window::new("Do you want to save your project?")
+        // background
+        egui::Area::new("exit_dialog_bg".into())
+            .order(egui::Order::Foreground)
+            .interactable(true)
+            .fixed_pos([0.0, 0.0])
+            .show(ctx, |ui| {
+                let rect = ui.input(|i| i.viewport_rect());
+                ui.painter()
+                    .rect_filled(rect, 0.0, Color32::from_black_alpha(150));
+                ui.allocate_rect(rect, Sense::click());
+            });
+
+        egui::Window::new("Save Project Before Exiting?")
+            .order(egui::Order::Tooltip)
             .collapsible(false)
             .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            // force window to always be on top
             .show(ctx, |ui| {
+                ui.label("You have unsaved changes. Do you want to save before exiting?\n");
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
-                        self.save();
-                        self.show_exit_dialog = false;
-                        ctx.send_viewport_cmd(ViewportCommand::Close);
-                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("Cancel").clicked() {
+                            self.show_exit_dialog = false;
+                        }
 
-                    if ui.button("Don't Save").clicked() {
-                        self.show_exit_dialog = false;
-                        self.force_close = true;
-                        ctx.send_viewport_cmd(ViewportCommand::Close);
-                    }
+                        if ui.button("Don't Save").clicked() {
+                            self.show_exit_dialog = false;
+                            self.force_close = true;
+                            ctx.send_viewport_cmd(ViewportCommand::Close);
+                        }
 
-                    if ui.button("Cancel").clicked() {
-                        self.show_exit_dialog = false;
-                    }
+                        let button = Button::new("Save").fill(to_colour32(
+                            self.ui_state.preferences().style.colours.highlighted,
+                        ));
+
+                        if ui.add(button).clicked() {
+                            self.save();
+                            self.show_exit_dialog = false;
+                            ctx.send_viewport_cmd(ViewportCommand::Close);
+                        }
+                    });
                 });
             });
     }
@@ -243,14 +308,14 @@ impl MinTracker {
         ui.horizontal(|ui| {
             if ui
                 .button(egui_phosphor::regular::FOLDER)
-                .on_hover_text("Open")
+                .on_hover_text("Open (CTRL+O)")
                 .clicked()
             {
                 self.load()
             }
             if ui
                 .button(egui_phosphor::regular::FLOPPY_DISK)
-                .on_hover_text("Save")
+                .on_hover_text("Save (CTRL+S)")
                 .clicked()
             {
                 self.save()
@@ -265,15 +330,16 @@ impl MinTracker {
                     .unwrap()
                     .push_event(ProjectEvent::CleanUnusedNotes)
             }
-        });
 
-        ui.horizontal(|ui| {
             if ui
                 .selectable_label(
                     self.ui_state.current_page == PageID::Preferences,
                     regular::SLIDERS,
                 )
-                .on_hover_text("Preferences")
+                .on_hover_text(format!(
+                    "Preferences ({:?})",
+                    self.ui_state.preferences().keybinds.show_preferences
+                ))
                 .clicked()
             {
                 self.ui_state.current_page = PageID::Preferences
@@ -326,19 +392,13 @@ impl MinTracker {
         ui.horizontal(|ui| {
             if player_active
                 && !is_paused
-                && ui
-                    .small_button(regular::PAUSE)
-                    .on_hover_text("Pause")
-                    .clicked()
+                && ui.button(regular::PAUSE).on_hover_text("Pause").clicked()
             {
                 self.ui_state.player.send_command(PlayerCmd::Pause);
             }
 
             if (!player_active || is_paused)
-                && ui
-                    .small_button(regular::PLAY)
-                    .on_hover_text("Play")
-                    .clicked()
+                && ui.button(regular::PLAY).on_hover_text("Play").clicked()
             {
                 if player_active {
                     self.ui_state.player.send_command(PlayerCmd::Resume);
@@ -348,14 +408,14 @@ impl MinTracker {
             }
 
             if ui
-                .add_enabled(player_active, Button::new(regular::STOP).small())
+                .add_enabled(player_active, Button::new(regular::STOP))
                 .on_hover_text("Stop")
                 .clicked()
             {
                 self.ui_state.player.send_command(PlayerCmd::Stop);
             }
 
-            let loop_button = Button::selectable(settings.loop_player, regular::REPEAT).small();
+            let loop_button = Button::selectable(settings.loop_player, regular::REPEAT);
             if ui.add(loop_button).clicked() {
                 proj.push_event(ProjectEvent::UpdateSettings(ProjectSettings {
                     loop_player: !settings.loop_player,
@@ -372,15 +432,18 @@ impl MinTracker {
     }
 
     fn pages_panel(&mut self, ui: &mut Ui) {
+        let kb = &self.ui_state.preferences().keybinds;
         let pages = [
-            ("Tracks", PageID::Track),
-            ("Chains", PageID::Chain),
-            ("Phrases", PageID::Phrase),
-            ("Instruments", PageID::Instrument),
+            ("Tracks", PageID::Track, kb.show_tracks),
+            ("Chains", PageID::Chain, kb.show_chains),
+            ("Phrases", PageID::Phrase, kb.show_phrases),
+            ("Instruments", PageID::Instrument, kb.show_instruments),
         ];
 
-        for (label, page_id) in pages.into_iter().rev() {
-            ui.selectable_value(&mut self.ui_state.current_page, page_id, label);
+        for (label, page_id, keybind) in pages.into_iter().rev() {
+            let tooltip = format!("{label} ({keybind:?})");
+            ui.selectable_value(&mut self.ui_state.current_page, page_id, label)
+                .on_hover_text(tooltip);
         }
     }
 
@@ -391,11 +454,13 @@ impl MinTracker {
             page.handle_undo(&self.project.read().unwrap());
         }
 
-        ui.heading(
-            RichText::new(page.heading(&self.ui_state))
-                .family(egui::FontFamily::Name("Bold".into())),
-        );
-        ui.separator();
+        // ui.heading(
+        //     RichText::new(page.heading(&self.ui_state))
+        //         .family(egui::FontFamily::Name("Bold".into())),
+        // );
+        // //ui.separator();
+        // let window_margin = self.ui_state.preferences().style.window_margin as f32;
+        // ui.add(Separator::default().grow(window_margin));
 
         page.update(ui, &mut self.ui_state, &self.project.read().unwrap());
     }
@@ -466,12 +531,12 @@ impl MinTracker {
         }
     }
 
-    fn set_style(ui: &mut Ui) {
-        ui.spacing_mut().item_spacing = Vec2 { x: 2.0, y: 2.0 };
-
-        let style = ui.style_mut();
-        style.interaction.selectable_labels = false;
-        style.animation_time = 0.0;
+    fn set_style(ctx: &Context) {
+        ctx.style_mut(|style| {
+            style.spacing.item_spacing = Vec2 { x: 2.0, y: 2.0 };
+            style.interaction.selectable_labels = false;
+            style.animation_time = 0.0;
+        });
     }
 
     fn play_viewed(&self) {

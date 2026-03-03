@@ -1,5 +1,5 @@
 use crate::{helpers::to_colour32, keybinds::Keybinds};
-use egui::{Context, FontFamily, TextStyle};
+use egui::{Context, FontFamily, Stroke, TextStyle};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -65,7 +65,7 @@ impl Default for Colours {
             text: [255, 255, 255],
             button_bg: [50, 50, 50],
             window_bg: [30, 30, 30],
-            highlighted: [50, 150, 250],
+            highlighted: [30, 100, 190],
         }
     }
 }
@@ -89,6 +89,16 @@ impl Colours {
             style.visuals.widgets.hovered.weak_bg_fill = to_colour32(self.button_bg);
             style.visuals.widgets.active.weak_bg_fill = to_colour32(self.button_bg);
 
+            style.visuals.widgets.noninteractive.bg_stroke =
+                Stroke::new(1.0, to_colour32(self.button_bg).linear_multiply(1.25));
+            style.visuals.widgets.inactive.bg_stroke =
+                Stroke::new(1.0, to_colour32(self.button_bg).linear_multiply(1.25));
+            style.visuals.widgets.hovered.bg_stroke =
+                Stroke::new(1.0, to_colour32(self.button_bg).linear_multiply(2.0));
+            style.visuals.widgets.hovered.expansion = 0.0;
+            style.visuals.widgets.active.bg_stroke =
+                Stroke::new(1.0, to_colour32(self.button_bg).linear_multiply(1.25));
+
             style.visuals.panel_fill = to_colour32(self.window_bg);
             style.visuals.striped = true;
 
@@ -100,6 +110,7 @@ impl Colours {
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct Style {
     pub rounded_corners: bool,
+    pub window_margin: i8,
     pub colours: Colours,
     pub ui_scale: f32,
 }
@@ -110,17 +121,17 @@ impl Default for Style {
             rounded_corners: false,
             colours: Colours::default(),
             ui_scale: 1.5,
+            window_margin: 8,
         }
     }
 }
 
 impl Style {
     pub fn apply(&self, ctx: &Context) {
-        self.colours.apply(ctx);
-
+        // general styling
         ctx.all_styles_mut(|style| {
             subsecond::call(|| {
-                let corner_radius = if self.rounded_corners { 4.0 } else { 0.0 }.into();
+                let corner_radius = if self.rounded_corners { 2.0 } else { 0.0 }.into();
                 style.visuals.widgets.noninteractive.corner_radius = corner_radius;
                 style.visuals.widgets.inactive.corner_radius = corner_radius;
                 style.visuals.widgets.hovered.corner_radius = corner_radius;
@@ -130,5 +141,12 @@ impl Style {
                 style.visuals.menu_corner_radius = corner_radius;
             });
         });
+
+        // colours
+        self.colours.apply(ctx);
+
+        // ui scale
+        let pix_per_point = ctx.native_pixels_per_point().unwrap_or(1.0) * self.ui_scale;
+        ctx.set_pixels_per_point(pix_per_point);
     }
 }
