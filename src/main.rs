@@ -34,7 +34,6 @@ mod widget;
 
 fn main() -> eframe::Result {
     dioxus_devtools::connect_subsecond();
-    //env_logger::init();
 
     let options = eframe::NativeOptions {
         ..Default::default()
@@ -46,33 +45,20 @@ fn main() -> eframe::Result {
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
             fonts.font_data.insert(
-                "Lekton-Regular".to_string(),
-                egui::FontData::from_static(include_bytes!("../assets/Lekton-Regular.ttf")).into(),
+                "Tiny-ExtraLight".to_string(),
+                egui::FontData::from_static(include_bytes!("../assets/Tiny-ExtraLight.ttf")).into(),
             );
             fonts.font_data.insert(
-                "VT323".to_string(),
-                egui::FontData::from_static(include_bytes!("../assets/Lekton-Italic.ttf")).into(),
+                "Tiny-Bold".to_string(),
+                egui::FontData::from_static(include_bytes!("../assets/Tiny-Bold.ttf")).into(),
             );
-            fonts.font_data.insert(
-                "Lekton-Bold".to_string(),
-                egui::FontData::from_static(include_bytes!("../assets/Lekton-Bold.ttf")).into(),
-            );
-            fonts.font_data.insert(
-                "Lekton-Italic".to_string(),
-                egui::FontData::from_static(include_bytes!("../assets/Lekton-Italic.ttf")).into(),
-            );
-
             fonts.families.insert(
                 egui::FontFamily::Proportional,
-                vec!["Lekton-Regular".into()],
+                vec!["Tiny-ExtraLight".into()],
             );
             fonts.families.insert(
                 egui::FontFamily::Name("Bold".into()),
-                vec!["Lekton-Bold".into()],
-            );
-            fonts.families.insert(
-                egui::FontFamily::Name("Italic".into()),
-                vec!["Lekton-Italic".into()],
+                vec!["Tiny-Bold".into()],
             );
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
@@ -146,13 +132,6 @@ impl App for MinTracker {
                     self.sidepanel(ui);
                 });
 
-            // ui.heading(
-            //     RichText::new(page.heading(&self.ui_state))
-            //         .family(egui::FontFamily::Name("Bold".into())),
-            // );
-            // //ui.separator();
-            // let window_margin = self.ui_state.preferences().style.window_margin as f32;
-            // ui.add(Separator::default().grow(window_margin));
             egui::TopBottomPanel::top("top_panel")
                 .resizable(false)
                 .frame(
@@ -176,16 +155,11 @@ impl App for MinTracker {
                 )
                 .show(ctx, |ui| {
                     // main area
-                    //ui.with_layout(egui::Layout::left_to_right(Align::Min), |ui| {
-                    //self.sidepanel(ui);
-                    //ui.separator();
                     ui.vertical(|ui| {
-                        //ui.set_width(ui.available_size().x);
                         self.update_page(ui);
 
                         ui.allocate_space(ui.available_size());
                     });
-                    //});
 
                     self.ui_state.show_toasts(ui);
                 });
@@ -343,7 +317,8 @@ impl MinTracker {
             }
         });
 
-        ui.add_sized([10.0, 10.0], Separator::default().horizontal());
+        ui.add_space(20.0);
+        //ui.add_sized([90.0, 10.0], Separator::default().horizontal());
 
         let proj = self.project.read().unwrap();
         let settings = proj.settings();
@@ -374,7 +349,8 @@ impl MinTracker {
             }
         });
 
-        ui.add_sized([10.0, 10.0], Separator::default().horizontal());
+        ui.add_space(20.0);
+        // ui.add_sized([90.0, 10.0], Separator::default().horizontal());
 
         let player_active = self.ui_state.player.is_playing();
         let is_paused = {
@@ -421,7 +397,8 @@ impl MinTracker {
             };
         });
 
-        ui.add_sized([10.0, 10.0], Separator::default().horizontal());
+        ui.add_space(20.0);
+        // ui.add_sized([90.0, 10.0], Separator::default().horizontal());
 
         self.pages
             .page_mut(self.ui_state.current_page)

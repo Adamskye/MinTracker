@@ -147,6 +147,10 @@ impl CellData<TrackUIGridState> for TrackCellData {
                 };
         }
     }
+
+    fn selectable(&self) -> bool {
+        matches!(self, TrackCellData::ChainButton { .. })
+    }
 }
 
 impl TrackCellData {
@@ -305,6 +309,8 @@ impl TrackUI {
         let position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
         if let Some(position_opt) = &position_opt {
             self.grid_state.playing = position_opt.clone();
+        } else {
+            self.grid_state.playing = vec![None; project.tracks().len()];
         }
 
         // update cells state
@@ -328,13 +334,6 @@ impl TrackUI {
 
             for (track_index, track) in project.tracks().iter().enumerate() {
                 for (chain_offset, &chain_id) in track.chains.iter().enumerate() {
-                    // let playing = position_opt
-                    //     .as_ref()
-                    //     .and_then(|positions| positions.get(track_index))
-                    //     .and_then(|opt| *opt)
-                    //     .filter(|position| position.chain_offset == chain_offset)
-                    //     .is_some();
-
                     self.cells_state.set(
                         chain_offset + 1,
                         track_index,
@@ -360,7 +359,7 @@ impl TrackUI {
         self.show_track_settings(ui.ctx(), project);
 
         ui.vertical(|ui| {
-            if ui.button(regular::PLUS).clicked() {
+            if ui.button(format!("{} New Track", regular::PLUS)).clicked() {
                 project.push_event(ProjectEvent::UpdateTrack {
                     index: project.tracks().len(),
                     new_track: Some(Box::new(Track::default())),
@@ -489,226 +488,6 @@ impl TrackUI {
         }
     }
 
-    // fn show_chain_row(
-    //     &mut self,
-    //     ui: &mut Ui,
-    //     row: usize,
-    //     project: &Project,
-    //     state: &mut AppUIState,
-    //     playing_positions: Option<&Vec<Option<ProjectLocation>>>,
-    // ) {
-    //     for track_num in 0..self.local_state.tracks.len() {
-    //         let is_playing = playing_positions
-    //             .as_ref()
-    //             .and_then(|position| {
-    //                 position
-    //                     .iter()
-    //                     .filter_map(|it_opt| *it_opt)
-    //                     .find(|it| it.track_idx == track_num && it.chain_offset == row)
-    //             })
-    //             .is_some();
-    //
-    //         self.show_chain_button(ui, state, project, row, track_num, is_playing);
-    //     }
-    // }
-
-    // fn show_chain_button(
-    //     &mut self,
-    //     ui: &mut Ui,
-    //     state: &mut AppUIState,
-    //     project: &Project,
-    //     row: usize,
-    //     track_num: usize,
-    //     playing: bool,
-    // ) {
-    //     let Some(chain) = self
-    //         .local_state
-    //         .tracks
-    //         .get_mut(track_num)
-    //         .and_then(|track| track.chains.get_mut(row))
-    //     else {
-    //         return;
-    //     };
-    //
-    //     let label = match chain {
-    //         Some(c) => c.to_string(),
-    //         None => "-".to_owned(),
-    //     };
-    //
-    //     let selected = if let Tool::Select(coords) = &self.tool {
-    //         selection::widget_in_selection(coords, row, track_num)
-    //     } else {
-    //         false
-    //     };
-    //
-    //     let btn = if selected {
-    //         Button::new(label).stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
-    //     } else {
-    //         Button::new(label)
-    //     }
-    //     .corner_radius(0.0)
-    //     .fill(Color32::TRANSPARENT)
-    //     .sense(Sense::click_and_drag());
-    //
-    //     let response = ui
-    //         .vertical_centered(|ui| {
-    //             ui.horizontal(|ui| {
-    //                 // playing position indicator
-    //                 let pos_indicator = RichText::new(">").color(if playing && chain.is_some() {
-    //                     Color32::RED
-    //                 } else {
-    //                     Color32::TRANSPARENT
-    //                 });
-    //                 ui.label(pos_indicator);
-    //
-    //                 // button
-    //                 ui.add_sized([40.0, 20.0], btn)
-    //             })
-    //             .inner
-    //         })
-    //         .inner;
-    //
-    //     match &mut self.tool {
-    //         Tool::Edit => {
-    //             Self::chain_button_interaction(ui, project, state, &response, chain, track_num, row)
-    //         }
-    //         Tool::Select(coords) => {
-    //             selection::handle_widget_selecting(ui, coords, &response, row, track_num);
-    //             self.selection_context_menu(&response, row, track_num);
-    //         }
-    //     }
-    // }
-
-    // fn chain_button_interaction(
-    //     ui: &mut Ui,
-    //     project: &Project,
-    //     state: &mut AppUIState,
-    //     response: &Response,
-    //     chain: &mut Option<u32>,
-    //     track_num: usize,
-    //     row: usize,
-    // ) {
-    //     if response.clicked() && chain.is_some() {
-    //         state.viewed_track = Some(track_num);
-    //         state.track_selected_row = Some(row);
-    //         state.viewed_chain = *chain;
-    //         state.current_page = PageID::Chain;
-    //     }
-    //
-    //     if response.clicked() && chain.is_none() {
-    //         *chain = project.chains().iter().next().map(|c| *c.0);
-    //     }
-    //
-    //     Self::chain_context_menu(project, response, chain);
-    //
-    //     if !response.hovered() {
-    //         return;
-    //     }
-    //
-    //     let Some(chain) = chain else {
-    //         return;
-    //     };
-    //
-    //     if ui.input(|i| i.key_pressed(Key::A)) {
-    //         for i in (0..*chain).rev() {
-    //             if project.chains().get(&i).is_some() {
-    //                 *chain = i;
-    //                 break;
-    //             }
-    //         }
-    //     } else if ui.input(|i| i.key_pressed(Key::D)) {
-    //         if let Some((max_key, _)) = project.chains().iter().next_back() {
-    //             for i in (*chain + 1)..=*max_key {
-    //                 if project.chains().get(&i).is_some() {
-    //                     *chain = i;
-    //                     break;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    // fn chain_context_menu(project: &Project, response: &Response, chain: &mut Option<u32>) {
-    //     response.context_menu(|ui| {
-    //         if ui.button("Create Chain").clicked() {
-    //             ui.close();
-    //             let id = Project::get_unique_key(project.chains());
-    //             project.push_event(ProjectEvent::UpdateChain {
-    //                 id,
-    //                 new_chain: Default::default(),
-    //             });
-    //             *chain = Some(id);
-    //         }
-    //         if ui.button("Delete Chain").clicked() {
-    //             ui.close();
-    //             *chain = None;
-    //         }
-    //         if ui.button("Rename Chain").clicked() {
-    //             ui.close();
-    //         }
-    //
-    //         if ui.button("Shallow Clone").clicked() {
-    //             ui.close();
-    //             Self::shallow_clone(chain, project);
-    //         }
-    //
-    //         if ui.button("Deep Clone").clicked() {
-    //             ui.close();
-    //             Self::deep_clone(chain, project);
-    //         }
-    //     });
-    // }
-
-    // fn selection_context_menu(&mut self, response: &Response, row: usize, track_num: usize) {
-    //     response.context_menu(|ui| {
-    //         if ui.button("Delete").clicked() {
-    //             ui.close();
-    //             self.delete_selection();
-    //         }
-    //
-    //         if ui.button("Cut").clicked() {
-    //             ui.close();
-    //             self.copy_selection();
-    //             self.delete_selection();
-    //         }
-    //
-    //         if ui.button("Copy").clicked() {
-    //             ui.close();
-    //             self.copy_selection();
-    //         }
-    //
-    //         if ui.button("Paste").clicked() {
-    //             ui.close();
-    //             self.paste_selection(row, track_num);
-    //         }
-    //     });
-    // }
-
-    // fn delete_selection(&mut self) {
-    //     let Tool::Select(Some((coord1, coord2))) = self.tool else {
-    //         return;
-    //     };
-    //
-    //     let small_x = coord1.0.min(coord2.0);
-    //     let big_x = coord1.0.max(coord2.0);
-    //     let small_y = coord1.1.min(coord2.1);
-    //     let big_y = coord1.1.max(coord2.1);
-    //
-    //     self.local_state
-    //         .tracks
-    //         .iter_mut()
-    //         .take(big_x + 1)
-    //         .skip(small_x)
-    //         .for_each(|track| {
-    //             track
-    //                 .chains
-    //                 .iter_mut()
-    //                 .take(big_y + 1)
-    //                 .skip(small_y)
-    //                 .for_each(|chain| *chain = None);
-    //         });
-    // }
-    //
     // fn copy_selection(&mut self) {
     //     let Tool::Select(Some((coord1, coord2))) = self.tool else {
     //         return;
