@@ -281,10 +281,20 @@ impl Page for TrackUI {
     }
 
     fn play(&self, state: &AppUIState, project: ROProject) {
-        let chain_offset = match self.tool {
-            Tool::Select(Some((coord1, coord2))) => std::cmp::min(coord1.1, coord2.1),
-            _ => 0,
-        };
+        let chain_offset = self
+            .cells_state
+            .get_selection()
+            .and_then(|s| {
+                let grid_row = s.first.0.min(s.last.0);
+                self.cells_state.get(grid_row, s.first.1).and_then(|cell| {
+                    if let TrackCellData::ChainButton { chain_offset, .. } = cell {
+                        Some(*chain_offset)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or(0);
 
         let scope = PlayerScope {
             first_notes: (0..project.read().unwrap().tracks().len())
@@ -307,14 +317,7 @@ impl Page for TrackUI {
 }
 
 impl TrackUI {
-    fn handle_keybinds(&mut self, ui: &mut Ui) {
-        if ui.input(|i| i.key_pressed(Key::E)) {
-            self.tool = Tool::Edit;
-        } else if ui.input(|i| i.key_pressed(Key::S)) {
-            self.tool = Tool::Select(None);
-        }
-    }
-
+    fn handle_keybinds(&mut self, _ui: &mut Ui) {}
     fn show_tracks(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         // fetch where the player is at
         let (tx, rx) = mpsc::channel();

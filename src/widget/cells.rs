@@ -3,9 +3,11 @@ use egui::FontId;
 
 use crate::{AppUIState, helpers::to_colour32, project::Project};
 
+#[derive(Clone)]
 pub struct GridSelection {
-    first: (usize, usize),
-    last: (usize, usize),
+    // (row, column)
+    pub first: (usize, usize),
+    pub last: (usize, usize),
 }
 
 pub struct CellGrid<T, G>
@@ -38,6 +40,10 @@ where
             _marker: std::marker::PhantomData,
             selection: None,
         }
+    }
+
+    pub fn get_selection(&self) -> Option<GridSelection> {
+        self.selection.clone()
     }
 
     pub fn num_rows(&self) -> usize {
