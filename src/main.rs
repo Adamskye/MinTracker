@@ -13,10 +13,7 @@ use eframe::{
     App,
     egui::{self, Button, DragValue, Key, Separator, Ui, ViewportCommand},
 };
-use egui::{
-    Align, Color32, Context, Frame, Layout, Margin, RichText, Sense, Shadow, Stroke, TextFormat,
-    UiBuilder, Vec2, text::LayoutJob,
-};
+use egui::{Align, Color32, Context, Frame, Layout, RichText, Sense, Vec2};
 use egui_phosphor::regular;
 use egui_toast::ToastKind;
 use project::{Project, ProjectEvent, ProjectSettings};

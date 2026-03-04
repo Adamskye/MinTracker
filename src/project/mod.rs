@@ -83,6 +83,21 @@ impl Default for ProjectSettings {
     }
 }
 
+#[derive(Copy, Clone, PartialEq)]
+pub struct ProjectTimestamp(std::time::Instant);
+
+impl ProjectTimestamp {
+    pub fn now() -> Self {
+        Self(std::time::Instant::now())
+    }
+}
+
+impl Default for ProjectTimestamp {
+    fn default() -> Self {
+        Self::now()
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Project {
     tracks: Vec<Track>,
@@ -94,6 +109,9 @@ pub struct Project {
 
     #[serde(skip)]
     event: Arc<Mutex<LinkedList<ProjectEvent>>>,
+
+    #[serde(skip)]
+    timestamp_last_update: ProjectTimestamp,
 }
 
 impl Default for Project {
@@ -107,6 +125,7 @@ impl Default for Project {
             effect_presets: BTreeMap::default(),
 
             event: Default::default(),
+            timestamp_last_update: ProjectTimestamp::default(),
         }
     }
 }
@@ -134,6 +153,10 @@ impl Project {
 
     pub fn effect_presets(&self) -> &BTreeMap<u32, EffectPreset> {
         &self.effect_presets
+    }
+
+    pub fn timestamp_last_update(&self) -> ProjectTimestamp {
+        self.timestamp_last_update
     }
 
     pub fn handle_events(&mut self) -> (bool, Vec<String>) {
@@ -170,6 +193,7 @@ impl Project {
                 }
                 PE::CleanUnusedNotes => self.clean_unused_notes(&mut log_messages),
             }
+            self.timestamp_last_update = ProjectTimestamp::now();
         }
 
         (changed, log_messages)

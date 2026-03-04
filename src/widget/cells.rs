@@ -1,5 +1,5 @@
 use eframe::egui::{self, Align, Color32, Id, Rect, Sense, Stroke, Ui, UiBuilder};
-use egui::{FontId, Pos2};
+use egui::FontId;
 
 use crate::{AppUIState, helpers::to_colour32, project::Project};
 
@@ -98,7 +98,7 @@ pub trait CellData<G> {
     ) {
     }
 
-    fn has_inner_widget(&self) -> bool {
+    fn has_inner_widget(&self, _grid_state: &mut G) -> bool {
         false
     }
 
@@ -271,7 +271,7 @@ pub fn cells<T, G>(
                 );
             }
 
-            if cell_data.has_inner_widget() {
+            if cell_data.has_inner_widget(grid_state) {
                 let mut ui = ui.new_child(UiBuilder::new().max_rect(cell_rect));
                 cell_data.inner_widget(&mut ui, grid_state, state, project);
             }
