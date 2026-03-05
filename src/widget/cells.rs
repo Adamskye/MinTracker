@@ -3,7 +3,7 @@ use egui::FontId;
 
 use crate::{AppUIState, helpers::to_colour32, project::Project};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GridSelection {
     // (row, column)
     pub first: (usize, usize),
@@ -44,6 +44,10 @@ where
 
     pub fn get_selection(&self) -> Option<GridSelection> {
         self.selection.clone()
+    }
+
+    pub fn get_highlighted_position(&self) -> (usize, usize) {
+        (self.highlighted_row, self.highlighted_col)
     }
 
     pub fn num_rows(&self) -> usize {

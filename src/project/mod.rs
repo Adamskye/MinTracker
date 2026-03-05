@@ -31,6 +31,9 @@ pub struct ProjectLocation {
 
 #[derive(Clone)]
 pub enum ProjectEvent {
+    UpdateTracks {
+        new_tracks: Vec<Track>,
+    },
     UpdateTrack {
         index: usize,
         new_track: Option<Box<Track>>,
@@ -164,7 +167,7 @@ impl Project {
         self.timestamp_last_update
     }
 
-    /// Returns event to undo the given event, if applicable.
+    /// Returns another event to undo the given event, if applicable.
     fn handle_event(
         &mut self,
         event: ProjectEvent,
@@ -173,6 +176,7 @@ impl Project {
         use ProjectEvent as PE;
         self.timestamp_last_update = ProjectTimestamp::now();
         match event {
+            PE::UpdateTracks { new_tracks } => self.update_tracks(new_tracks),
             PE::UpdateTrack { index, new_track } => self.update_track(index, new_track),
             PE::UpdateTrackSettings {
                 index,
@@ -224,6 +228,14 @@ impl Project {
 
     pub fn push_event(&self, event: ProjectEvent) {
         self.event.lock().unwrap().push_back(event);
+    }
+
+    fn update_tracks(&mut self, new_tracks: Vec<Track>) -> Option<ProjectEvent> {
+        let undo = Some(ProjectEvent::UpdateTracks {
+            new_tracks: self.tracks.clone(),
+        });
+        self.tracks = new_tracks;
+        undo
     }
 
     fn update_settings(&mut self, new_settings: ProjectSettings) -> Option<ProjectEvent> {

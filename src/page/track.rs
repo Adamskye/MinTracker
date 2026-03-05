@@ -4,7 +4,7 @@ use eframe::{
     egui::{Button, ComboBox, Context, DragValue, Grid, ScrollArea, Ui, Window},
     epaint::Color32,
 };
-use egui::Key;
+use egui::{Event, Key};
 use egui_phosphor::regular;
 use itertools::Itertools;
 
@@ -274,7 +274,7 @@ struct TrackUIGridState {
 }
 
 pub struct TrackUI {
-    _clipboard: Clipboard,
+    clipboard: Clipboard,
     grid_state: TrackUIGridState,
 
     cells_state: CellGrid<TrackCellData, TrackUIGridState>,
@@ -284,7 +284,7 @@ pub struct TrackUI {
 impl Default for TrackUI {
     fn default() -> Self {
         Self {
-            _clipboard: Default::default(),
+            clipboard: Default::default(),
             grid_state: TrackUIGridState::default(),
             cells_state: CellGrid::new(CHAINS_PER_TRACK, 0),
             grid_update_ts: None,
@@ -297,7 +297,7 @@ impl Page for TrackUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         ScrollArea::both().show(ui, |ui| {
             //self.undo.push(&project.tracks());
-            self.handle_keybinds(ui);
+            self.handle_keybinds(ui, project);
             ui.horizontal(|ui| {
                 self.show_tracks(ui, state, project);
             });
@@ -345,8 +345,15 @@ impl Page for TrackUI {
 }
 
 impl TrackUI {
-    fn handle_keybinds(&mut self, ui: &mut Ui) {
+    fn handle_keybinds(&mut self, ui: &mut Ui, project: &Project) {
         // copy and paste
+        ui.input(|i| {
+            if i.events.iter().any(|e| matches!(e, Event::Copy)) {
+                self.copy_selection(project);
+            } else if i.modifiers.command && i.events.iter().any(|e| matches!(e, Event::Paste(_))) {
+                self.paste_clipboard(project);
+            }
+        });
     }
 
     fn show_tracks(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
@@ -537,55 +544,94 @@ impl TrackUI {
         }
     }
 
-    // fn copy_selection(&mut self) {
-    //     let Tool::Select(Some((coord1, coord2))) = self.tool else {
-    //         return;
-    //     };
-    //
-    //     let small_x = coord1.0.min(coord2.0);
-    //     let big_x = coord1.0.max(coord2.0);
-    //     let small_y = coord1.1.min(coord2.1);
-    //     let big_y = coord1.1.max(coord2.1);
-    //
-    //     self.clipboard.clear();
-    //
-    //     self.local_state
-    //         .tracks
-    //         .iter_mut()
-    //         .take(big_x + 1)
-    //         .skip(small_x)
-    //         .for_each(|track| {
-    //             self.clipboard.push(
-    //                 track
-    //                     .chains
-    //                     .iter()
-    //                     .cloned()
-    //                     .take(big_y + 1)
-    //                     .skip(small_y)
-    //                     .collect(),
-    //             );
-    //         });
-    // }
-    //
-    // fn paste_selection(&mut self, row: usize, column: usize) {
-    //     self.local_state
-    //         .tracks
-    //         .iter_mut()
-    //         .skip(column)
-    //         .take(self.clipboard.len())
-    //         .zip(&self.clipboard)
-    //         .for_each(|(proj_track, clip_track)| {
-    //             proj_track
-    //                 .chains
-    //                 .iter_mut()
-    //                 .skip(row)
-    //                 .take(clip_track.len())
-    //                 .zip(clip_track)
-    //                 .for_each(|(proj_chain, clip_chain)| {
-    //                     *proj_chain = *clip_chain;
-    //                 });
-    //         });
-    // }
+    fn copy_selection(&mut self, project: &Project) {
+        // get selection from cells_state
+        let Some(selection) = self.cells_state.get_selection() else {
+            return;
+        };
+
+        let Some(small_row) = selection.first.0.checked_sub(1) else {
+            return;
+        };
+        let Some(big_row) = selection.first.0.checked_sub(1) else {
+            return;
+        };
+
+        // subtracting 1 to ignore the options button row
+        let small_col = selection.first.1.min(selection.last.1);
+        let big_col = selection.first.1.max(selection.last.1);
+
+        self.clipboard = project
+            .tracks()
+            .iter()
+            .skip(small_col)
+            .take(big_col + 1 - small_col)
+            .map(|track| {
+                track
+                    .chains
+                    .iter()
+                    .cloned()
+                    .skip(small_row)
+                    .take(big_row + 1 - small_row)
+                    .collect::<Vec<Option<u32>>>()
+            })
+            .collect::<Vec<Vec<Option<u32>>>>();
+    }
+
+    fn paste_clipboard(&mut self, project: &Project) {
+        let Some(row) = self
+            .cells_state
+            .get_selection()
+            .map(|s| s.first.0.min(s.last.0))
+            .unwrap_or_else(|| self.cells_state.get_highlighted_position().0)
+            .checked_sub(1)
+        else {
+            return;
+        };
+
+        let Some(column) = self
+            .cells_state
+            .get_selection()
+            .map(|s| s.first.1.min(s.last.1))
+            .or_else(|| Some(self.cells_state.get_highlighted_position().1))
+        else {
+            return;
+        };
+
+        let new_tracks = project
+            .tracks()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(track_idx, mut track)| {
+                if track_idx < column {
+                    return track;
+                }
+
+                // for each track being pasted into
+                let clip_track = track_idx - column;
+                let Some(clipboard_col) = self.clipboard.get(clip_track) else {
+                    return track;
+                };
+
+                for i in 0..clipboard_col.len() {
+                    let Some(clipboard_chain) = clipboard_col.get(i) else {
+                        continue;
+                    };
+
+                    let Some(chain_to_replace) = track.chains.get_mut(row + i) else {
+                        continue;
+                    };
+
+                    *chain_to_replace = *clipboard_chain;
+                }
+
+                track
+            })
+            .collect::<Vec<Track>>();
+
+        project.push_event(ProjectEvent::UpdateTracks { new_tracks });
+    }
 }
 
 fn shallow_clone(chain_id: u32, project: &Project) -> u32 {
