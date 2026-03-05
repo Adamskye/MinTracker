@@ -127,17 +127,18 @@ pub trait CellData<G> {
     ) {
     }
 
-    /// extra action to perform when double clicked or trigger button is pressed when this cell is
+    /// Extra action to perform when double clicked or trigger button is pressed when this cell is
     /// highlighted.
     /// By default, will call self.on_click(...)
     fn trigger_action(&self, grid_state: &mut G, state: &mut AppUIState, project: &Project) {
         self.on_click(grid_state, state, project);
     }
 
-    /// extra action to perform when single-clicked
+    /// Extra action to perform when single-clicked
     fn on_click(&self, _grid_state: &mut G, _state: &mut AppUIState, _project: &Project) {}
 
-    /// only runs when this cell is highlighted
+    /// If there is no selection, then this is run if the cell is highlighted.
+    /// If there is a selection, then this is run for all cells in the selection.
     fn on_keyboard_input(
         &self,
         _input: &egui::InputState,
@@ -260,6 +261,16 @@ pub fn cells<T, G>(
             let cell_is_highlighted =
                 row == env.highlighted_row() && column == env.highlighted_col();
 
+            let cell_is_selected = env.selection.as_ref().map_or(false, |selection| {
+                let (start_row, start_col) = selection.first;
+                let (end_row, end_col) = selection.last;
+
+                row >= start_row.min(end_row)
+                    && row <= start_row.max(end_row)
+                    && column >= start_col.min(end_col)
+                    && column <= start_col.max(end_col)
+            });
+
             if !ui.is_rect_visible(cell_rect) {
                 continue;
             }
@@ -339,7 +350,9 @@ pub fn cells<T, G>(
             }
 
             // keyboard input
-            if cell_is_highlighted {
+            if (env.selection.is_none() && cell_is_highlighted)
+                || env.selection.is_some() && cell_is_selected
+            {
                 ui.input(|i| {
                     cell_data.on_keyboard_input(i, grid_state, state, project);
                 });

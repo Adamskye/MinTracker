@@ -345,7 +345,10 @@ impl Page for TrackUI {
 }
 
 impl TrackUI {
-    fn handle_keybinds(&mut self, _ui: &mut Ui) {}
+    fn handle_keybinds(&mut self, ui: &mut Ui) {
+        // copy and paste
+    }
+
     fn show_tracks(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         // fetch where the player is at
         let (tx, rx) = mpsc::channel();
