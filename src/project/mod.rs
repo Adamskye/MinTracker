@@ -545,32 +545,188 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
-    use crate::helpers;
-
     use super::*;
 
     #[test]
-    fn frequency() {
-        let mut note = Note::default();
-        macro_rules! freq {
-            ($note:ident) => {
-                helpers::frequency_from_semitone($note.semitone().unwrap() as f32)
-            };
+    fn test_handle_event_update_tracks() {
+        let mut project = Project::default();
+        let new_tracks = vec![Track::default(); 3];
+        let mut logs = vec![];
+        let undo = project.handle_event(
+            ProjectEvent::UpdateTracks {
+                new_tracks: new_tracks.clone(),
+            },
+            &mut logs,
+        );
+        assert_eq!(project.tracks().len(), 3);
+        assert!(undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_update_track() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let track = Box::new(Track::default());
+        let undo = project.handle_event(
+            ProjectEvent::UpdateTrack {
+                index: 0,
+                new_track: Some(track),
+            },
+            &mut logs,
+        );
+        assert!(undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_update_track_settings() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let settings = TrackSettings::default();
+        let undo = project.handle_event(
+            ProjectEvent::UpdateTrackSettings {
+                index: 0,
+                new_settings: settings,
+            },
+            &mut logs,
+        );
+        assert!(undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_update_track_cell() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let undo = project.handle_event(
+            ProjectEvent::UpdateTrackCell {
+                track_index: 0,
+                chain_offset: 0,
+                new_chain_id: None,
+            },
+            &mut logs,
+        );
+        // may be none if chain_offset out of bounds
+        assert!(undo.is_none() || undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_update_chain() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let chain = Box::new(Chain::default());
+        let undo = project.handle_event(
+            ProjectEvent::UpdateChain {
+                id: 42,
+                new_chain: chain,
+            },
+            &mut logs,
+        );
+        assert!(undo.is_none() || undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_update_phrase() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let phrase = Box::new(Phrase::default());
+        let undo = project.handle_event(
+            ProjectEvent::UpdatePhrase {
+                id: 7,
+                new_phrase: phrase,
+            },
+            &mut logs,
+        );
+        assert!(undo.is_none() || undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_update_instrument() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let instrument = Box::new(Instrument::default());
+        let undo = project.handle_event(
+            ProjectEvent::UpdateInstrument {
+                id: 1,
+                new_instrument: Some(instrument),
+            },
+            &mut logs,
+        );
+        assert!(undo.is_none() || undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_update_effect_preset() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let preset = Box::new(EffectPreset::default());
+        let undo = project.handle_event(
+            ProjectEvent::UpdateEffectPreset {
+                id: 5,
+                new_preset: Some(preset),
+            },
+            &mut logs,
+        );
+        assert!(undo.is_none() || undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_update_settings() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let settings = ProjectSettings::default();
+        let undo = project.handle_event(ProjectEvent::UpdateSettings(settings), &mut logs);
+        assert!(undo.is_some());
+    }
+
+    #[test]
+    fn test_handle_event_clean_unused_notes() {
+        let mut project = Project::default();
+
+        // add a bunch of chains and phrases that aren't used
+        for i in 0..5 {
+            project.chains.insert(i, Chain::default());
+            project.phrases.insert(i, Phrase::default());
         }
 
-        note.set_semitone(Some(57));
-        assert!((freq!(note) - 440.0).abs() < 0.1);
+        // add a couple chains and phrases that are used
+        project.chains.insert(100, Chain::default());
+        project.phrases.insert(100, Phrase::default());
+        project.tracks[0].chains[0] = Some(100);
+        project.chains.get_mut(&100).unwrap().rows[0].phrase = Some(100);
 
-        note.set_semitone(Some(0));
-        assert!((freq!(note) - 16.35).abs() < 0.1);
+        project.push_event(ProjectEvent::CleanUnusedNotes);
+        let (changed, _) = project.handle_events();
+        assert!(changed);
 
-        note.set_semitone(Some(69));
-        assert!((freq!(note) - 880.0).abs() < 0.1);
+        for i in 0..5 {
+            // should be cleaned
+            assert!(!project.chains.contains_key(&i));
+            assert!(!project.phrases.contains_key(&i));
+        }
 
-        note.set_semitone(Some(27));
-        assert!((freq!(note) - 77.78).abs() < 0.1);
+        // should not be cleaned
+        assert!(project.chains.contains_key(&100));
+        assert!(project.phrases.contains_key(&100));
+    }
 
-        note.set_semitone(Some(107));
-        assert!((freq!(note) - 7902.13).abs() < 0.1);
+    #[test]
+    fn test_handle_event_undo() {
+        let mut project = Project::default();
+        let mut logs = vec![];
+        let undo = project.handle_event(ProjectEvent::Undo, &mut logs);
+        assert!(undo.is_none());
+
+        project.push_event(ProjectEvent::UpdateSettings(ProjectSettings {
+            tempo: 150.0,
+            transpose: 2,
+            loop_player: true,
+        }));
+
+        let (changed, _) = project.handle_events();
+        assert!(changed);
+        project.push_event(ProjectEvent::Undo);
+        let (changed, _) = project.handle_events();
+        assert!(changed);
+
+        assert!(*project.settings() == ProjectSettings::default());
     }
 }

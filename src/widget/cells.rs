@@ -265,7 +265,7 @@ pub fn cells<T, G>(
             let cell_is_highlighted =
                 row == env.highlighted_row() && column == env.highlighted_col();
 
-            let cell_is_selected = env.selection.as_ref().map_or(false, |selection| {
+            let cell_is_selected = env.selection.as_ref().is_some_and(|selection| {
                 let (start_row, start_col) = selection.first;
                 let (end_row, end_col) = selection.last;
 

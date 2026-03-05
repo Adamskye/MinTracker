@@ -48,3 +48,35 @@ impl Note {
         semitone / 12
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::helpers;
+
+    use super::*;
+
+    #[test]
+    fn frequency() {
+        let mut note = Note::default();
+        macro_rules! freq {
+            ($note:ident) => {
+                helpers::frequency_from_semitone($note.semitone().unwrap() as f32)
+            };
+        }
+
+        note.set_semitone(Some(57));
+        assert!((freq!(note) - 440.0).abs() < 0.1);
+
+        note.set_semitone(Some(0));
+        assert!((freq!(note) - 16.35).abs() < 0.1);
+
+        note.set_semitone(Some(69));
+        assert!((freq!(note) - 880.0).abs() < 0.1);
+
+        note.set_semitone(Some(27));
+        assert!((freq!(note) - 77.78).abs() < 0.1);
+
+        note.set_semitone(Some(107));
+        assert!((freq!(note) - 7902.13).abs() < 0.1);
+    }
+}
