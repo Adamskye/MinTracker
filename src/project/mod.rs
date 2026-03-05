@@ -62,6 +62,7 @@ pub enum ProjectEvent {
     },
     UpdateSettings(ProjectSettings),
     CleanUnusedNotes,
+    Undo,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -112,6 +113,9 @@ pub struct Project {
 
     #[serde(skip)]
     timestamp_last_update: ProjectTimestamp,
+
+    #[serde(skip)]
+    reverse_undo_stack: Vec<ProjectEvent>,
 }
 
 impl Default for Project {
@@ -126,6 +130,7 @@ impl Default for Project {
 
             event: Default::default(),
             timestamp_last_update: ProjectTimestamp::default(),
+            reverse_undo_stack: Vec::new(),
         }
     }
 }
@@ -159,6 +164,47 @@ impl Project {
         self.timestamp_last_update
     }
 
+    /// Returns event to undo the given event, if applicable.
+    fn handle_event(
+        &mut self,
+        event: ProjectEvent,
+        log_messages: &mut Vec<String>,
+    ) -> Option<ProjectEvent> {
+        use ProjectEvent as PE;
+        self.timestamp_last_update = ProjectTimestamp::now();
+        match event {
+            PE::UpdateTrack { index, new_track } => self.update_track(index, new_track),
+            PE::UpdateTrackSettings {
+                index,
+                new_settings,
+            } => self.update_track_settings(index, new_settings),
+            PE::UpdateTrackCell {
+                track_index,
+                chain_offset,
+                new_chain_id,
+            } => self.update_track_cell(track_index, chain_offset, new_chain_id),
+            PE::UpdateChain { id, new_chain } => self.update_chain(id, *new_chain),
+            PE::UpdatePhrase { id, new_phrase } => self.update_phrase(id, *new_phrase),
+            PE::UpdateInstrument { id, new_instrument } => {
+                self.update_instrument(id, new_instrument)
+            }
+            PE::UpdateSettings(settings) => self.update_settings(settings),
+            PE::UpdateEffectPreset { id, new_preset } => self.update_effect_preset(id, new_preset),
+            PE::CleanUnusedNotes => {
+                self.clean_unused_notes(log_messages);
+                None
+            }
+            PE::Undo => {
+                if let Some(undo_event) = self.reverse_undo_stack.pop() {
+                    self.handle_event(undo_event, log_messages);
+                } else {
+                    log_messages.push("Nothing to undo".to_string());
+                }
+                None
+            }
+        }
+    }
+
     pub fn handle_events(&mut self) -> (bool, Vec<String>) {
         let mut changed = false;
         let mut log_messages = Vec::new();
@@ -168,32 +214,9 @@ impl Project {
             ev.pop_front()
         } {
             changed = true;
-            use ProjectEvent as PE;
-            match event {
-                PE::UpdateTrack { index, new_track } => self.update_track(index, new_track),
-                PE::UpdateTrackSettings {
-                    index,
-                    new_settings,
-                } => {
-                    self.update_track_settings(index, new_settings);
-                }
-                PE::UpdateTrackCell {
-                    track_index,
-                    chain_offset,
-                    new_chain_id,
-                } => self.update_track_cell(track_index, chain_offset, new_chain_id),
-                PE::UpdateChain { id, new_chain } => self.update_chain(id, *new_chain),
-                PE::UpdatePhrase { id, new_phrase } => self.update_phrase(id, *new_phrase),
-                PE::UpdateInstrument { id, new_instrument } => {
-                    self.update_instrument(id, new_instrument)
-                }
-                PE::UpdateSettings(settings) => self.settings = settings,
-                PE::UpdateEffectPreset { id, new_preset } => {
-                    self.update_effect_preset(id, new_preset)
-                }
-                PE::CleanUnusedNotes => self.clean_unused_notes(&mut log_messages),
+            if let Some(undo_event) = self.handle_event(event, &mut log_messages) {
+                self.reverse_undo_stack.push(undo_event);
             }
-            self.timestamp_last_update = ProjectTimestamp::now();
         }
 
         (changed, log_messages)
@@ -203,10 +226,24 @@ impl Project {
         self.event.lock().unwrap().push_back(event);
     }
 
-    fn update_track_settings(&mut self, index: usize, new_settings: TrackSettings) {
-        if let Some(track) = self.tracks.get_mut(index) {
-            track.settings = new_settings;
-        }
+    fn update_settings(&mut self, new_settings: ProjectSettings) -> Option<ProjectEvent> {
+        let undo = Some(ProjectEvent::UpdateSettings(self.settings.clone()));
+        self.settings = new_settings;
+        undo
+    }
+
+    fn update_track_settings(
+        &mut self,
+        index: usize,
+        new_settings: TrackSettings,
+    ) -> Option<ProjectEvent> {
+        let track = self.tracks.get_mut(index)?;
+        let undo = Some(ProjectEvent::UpdateTrackSettings {
+            index,
+            new_settings: track.settings.clone(),
+        });
+        track.settings = new_settings;
+        undo
     }
 
     fn update_track_cell(
@@ -214,15 +251,25 @@ impl Project {
         track_index: usize,
         chain_offset: usize,
         new_chain_id: Option<u32>,
-    ) {
-        if let Some(track) = self.tracks.get_mut(track_index) {
-            if chain_offset < track.chains.len() {
-                track.chains[chain_offset] = new_chain_id;
-            }
+    ) -> Option<ProjectEvent> {
+        let track = self.tracks.get_mut(track_index)?;
+        if chain_offset >= track.chains.len() {
+            return None;
         }
+
+        let undo = Some(ProjectEvent::UpdateTrackCell {
+            track_index,
+            chain_offset,
+            new_chain_id: track.chains[chain_offset],
+        });
+        track.chains[chain_offset] = new_chain_id;
+        undo
     }
 
     fn clean_unused_notes(&mut self, log_messages: &mut Vec<String>) {
+        // delete undo history
+        self.reverse_undo_stack.clear();
+
         // clean chains
         let mut chains_to_delete = Vec::new();
         for chain_id in self.chains().keys() {
@@ -315,41 +362,115 @@ impl Project {
         None
     }
 
-    pub fn update_track(&mut self, index: usize, new_track: Option<Box<Track>>) {
+    pub fn update_track(
+        &mut self,
+        index: usize,
+        new_track: Option<Box<Track>>,
+    ) -> Option<ProjectEvent> {
         let Some(new_track) = new_track else {
             // removing track
             if index < self.tracks.len() {
+                let old_track = self.tracks[index].clone();
                 self.tracks.remove(index);
+
+                // undo event
+                return Some(ProjectEvent::UpdateTrack {
+                    index,
+                    new_track: Some(Box::new(old_track)),
+                });
+            } else {
+                // can't do anything since new_track does not exist and index is out of bounds
+                return None;
             }
-            return;
         };
 
         match self.tracks.get_mut(index) {
-            Some(track) => *track = *new_track,
-            None => self.tracks.push(*new_track),
-        };
+            Some(track) => {
+                let undo = Some(ProjectEvent::UpdateTrack {
+                    index,
+                    new_track: Some(Box::new(track.clone())), // undo event
+                });
+                *track = *new_track;
+                undo
+            }
+            None => {
+                self.tracks.push(*new_track);
+                Some(ProjectEvent::UpdateTrack {
+                    index: self.tracks.len() - 1,
+                    new_track: None,
+                })
+            }
+        }
     }
 
-    pub fn update_chain(&mut self, chain_id: u32, new_chain: Chain) {
-        self.chains.insert(chain_id, new_chain);
+    pub fn update_chain(&mut self, id: u32, new_chain: Chain) -> Option<ProjectEvent> {
+        let undo = self
+            .chains
+            .get(&id)
+            .cloned()
+            .map(|old_chain| ProjectEvent::UpdateChain {
+                id,
+                new_chain: Box::new(old_chain),
+            });
+        self.chains.insert(id, new_chain);
+        undo
     }
 
-    pub fn update_phrase(&mut self, phrase_id: u32, new_phrase: Phrase) {
-        self.phrases.insert(phrase_id, new_phrase);
+    pub fn update_phrase(&mut self, id: u32, new_phrase: Phrase) -> Option<ProjectEvent> {
+        let undo = self
+            .phrases
+            .get(&id)
+            .cloned()
+            .map(|old_phrase| ProjectEvent::UpdatePhrase {
+                id,
+                new_phrase: Box::new(old_phrase),
+            });
+        self.phrases.insert(id, new_phrase);
+        undo
     }
 
-    pub fn update_instrument(&mut self, id: u32, instrument: Option<Box<Instrument>>) {
+    pub fn update_instrument(
+        &mut self,
+        id: u32,
+        instrument: Option<Box<Instrument>>,
+    ) -> Option<ProjectEvent> {
+        let undo = self.instruments.get(&id).cloned().map(|old_instrument| {
+            ProjectEvent::UpdateInstrument {
+                id,
+                new_instrument: Some(Box::new(old_instrument)),
+            }
+        });
+
         match instrument {
-            Some(instrument) => self.instruments.insert(id, *instrument),
-            None => self.instruments.remove(&id),
-        };
+            Some(instrument) => {
+                self.instruments.insert(id, *instrument);
+            }
+            None => {
+                self.instruments.remove(&id);
+            }
+        }
+
+        undo
     }
 
-    pub fn update_effect_preset(&mut self, id: u32, effect_preset: Option<Box<EffectPreset>>) {
+    pub fn update_effect_preset(
+        &mut self,
+        id: u32,
+        effect_preset: Option<Box<EffectPreset>>,
+    ) -> Option<ProjectEvent> {
+        let undo = self
+            .effect_presets
+            .get(&id)
+            .cloned()
+            .map(|old_effect_preset| ProjectEvent::UpdateEffectPreset {
+                id,
+                new_preset: Some(Box::new(old_effect_preset)),
+            });
         match effect_preset {
             Some(effect_preset) => self.effect_presets.insert(id, *effect_preset),
             None => self.effect_presets.remove(&id),
         };
+        undo
     }
 
     pub fn get_unique_key<T>(map: &BTreeMap<u32, T>) -> u32 {

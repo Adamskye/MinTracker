@@ -19,7 +19,8 @@ mod track;
 pub trait Page {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
-    fn handle_undo(&mut self, project: &Project);
+    fn handle_undo(&mut self, _project: &Project) {}
+    fn handle_redo(&mut self, _project: &Project) {}
     fn play(&self, _state: &AppUIState, _project: ROProject) {}
     fn heading(&self, _state: &AppUIState) -> String;
 }

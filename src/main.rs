@@ -11,12 +11,9 @@ use crate::{
 };
 use eframe::{
     App,
-    egui::{self, Button, DragValue, Key, Separator, Ui, ViewportCommand},
+    egui::{self, Button, DragValue, Key, Ui, ViewportCommand},
 };
-use egui::{
-    Align, Color32, Context, Frame, LayerId, Layout, Popup, PopupAnchor, RichText, Sense, Vec2,
-    containers::menu::MenuButton,
-};
+use egui::{Align, Color32, Context, Frame, Layout, RichText, Sense, Vec2};
 use egui_phosphor::regular;
 use egui_toast::ToastKind;
 use project::{Project, ProjectEvent, ProjectSettings};
@@ -33,7 +30,6 @@ mod preferences;
 mod project;
 mod selection;
 mod synth;
-mod undo_stack;
 mod widget;
 
 fn main() -> eframe::Result {
@@ -80,7 +76,6 @@ struct MinTracker {
 
     show_exit_dialog: bool,
     force_close: bool,
-    show_recent_files_dialog: bool,
 }
 
 impl Default for MinTracker {
@@ -93,7 +88,6 @@ impl Default for MinTracker {
 
             show_exit_dialog: false,
             force_close: false,
-            show_recent_files_dialog: false,
         }
     }
 }
@@ -101,16 +95,8 @@ impl Default for MinTracker {
 impl App for MinTracker {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         subsecond::call(|| {
-            {
-                let (changed, messages) = self.project.write().unwrap().handle_events();
-                if changed {
-                    self.ui_state.project_dirty = true;
-                }
-
-                for msg in messages {
-                    self.ui_state.add_toast(ToastKind::Info, msg);
-                }
-            }
+            self.handle_global_keybinds(&ctx);
+            self.update_project_events();
 
             if self.ui_state.player.is_playing() {
                 ctx.request_repaint()
@@ -118,7 +104,6 @@ impl App for MinTracker {
 
             Self::set_style(&ctx);
             self.ui_state.preferences().style.apply(ctx);
-            self.handle_global_keybinds(&ctx);
 
             let window_fill = to_colour32(self.ui_state.preferences().style.colours.window_bg);
             let sidepanel_fill = window_fill.linear_multiply(1.3);
@@ -186,6 +171,21 @@ impl App for MinTracker {
 }
 
 impl MinTracker {
+    fn update_project_events(&mut self) {
+        let Ok(mut project) = self.project.write() else {
+            return;
+        };
+
+        let (changed, messages) = project.handle_events();
+        if changed {
+            self.ui_state.project_dirty = true;
+        }
+
+        for msg in messages {
+            self.ui_state.add_toast(ToastKind::Info, msg);
+        }
+    }
+
     fn handle_global_keybinds(&mut self, ctx: &Context) {
         // handle audio
         if ctx.input(|i| i.key_pressed(self.ui_state.preferences().keybinds.play_pause)) {
@@ -223,6 +223,16 @@ impl MinTracker {
             }
             if i.key_pressed(Key::O) && i.modifiers.ctrl {
                 self.load()
+            }
+        });
+
+        // handle undo and redo
+        let Ok(project) = self.project.read() else {
+            return;
+        };
+        ctx.input(|i| {
+            if i.key_pressed(Key::Z) && i.modifiers.ctrl {
+                project.push_event(ProjectEvent::Undo);
             }
         });
     }
@@ -329,31 +339,6 @@ impl MinTracker {
             })
         });
 
-        // ui.horizontal(|ui| {
-        //     let button = Button::new(regular::CLOCK_COUNTER_CLOCKWISE);
-        //     let response = ui.add(button).on_hover_text("Recent Projects");
-        //     if response.clicked() {
-        //         self.show_recent_files_dialog = !self.show_recent_files_dialog;
-        //     }
-        //
-        //     if self.show_recent_files_dialog {
-        //         Popup::new(
-        //             "recent_projects_popup".into(),
-        //             ui.ctx().clone(),
-        //             PopupAnchor::ParentRect(response.rect),
-        //             LayerId::new(egui::Order::Tooltip, "recent_projects_popup_layer".into()),
-        //         )
-        //         .show(|ui| {
-        //             ui.button("Test")
-        //                 .clicked()
-        //                 .then(|| dbg!("Clicked recent project"))
-        //         });
-        //     }
-        // })
-        // .response
-        // .clicked_elsewhere()
-        // .then(|| self.show_recent_files_dialog = false);
-
         ui.add_space(20.0);
 
         let proj = self.project.read().unwrap();
@@ -457,20 +442,20 @@ impl MinTracker {
 
     fn update_page(&mut self, ui: &mut Ui) {
         let page = self.pages.page_mut(self.ui_state.current_page);
+        let Ok(project) = self.project.read() else {
+            ui.label("Failed to load project; you shouldn't be seeing this!");
+            return;
+        };
 
-        if ui.input(|i| i.key_pressed(Key::Z) && i.modifiers.ctrl) {
-            page.handle_undo(&self.project.read().unwrap());
-        }
+        page.update(ui, &mut self.ui_state, &*project);
 
-        // ui.heading(
-        //     RichText::new(page.heading(&self.ui_state))
-        //         .family(egui::FontFamily::Name("Bold".into())),
-        // );
-        // //ui.separator();
-        // let window_margin = self.ui_state.preferences().style.window_margin as f32;
-        // ui.add(Separator::default().grow(window_margin));
-
-        page.update(ui, &mut self.ui_state, &self.project.read().unwrap());
+        ui.input(|i| {
+            if i.key_pressed(Key::Z) && i.modifiers.ctrl {
+                page.handle_undo(&project);
+            } else if i.key_pressed(Key::Y) && i.modifiers.ctrl {
+                page.handle_redo(&project);
+            }
+        });
     }
 
     fn save(&mut self) {

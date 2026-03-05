@@ -1,7 +1,7 @@
 use std::sync::mpsc;
 
 use eframe::{
-    egui::{Button, ComboBox, Context, DragValue, Grid, Key, ScrollArea, Ui, Window},
+    egui::{Button, ComboBox, Context, DragValue, Grid, ScrollArea, Ui, Window},
     epaint::Color32,
 };
 use egui_phosphor::regular;
@@ -11,20 +11,11 @@ use crate::{
     AppUIState, ProjectEvent,
     page::{Page, PageID},
     project::{CHAINS_PER_TRACK, Project, ProjectLocation, ProjectTimestamp, Track},
-    selection::SelectionCoords,
     synth::{PlayerCmd, PlayerScope, ROProject},
-    undo_stack::UndoStack,
     widget::cells::{self, CellData, CellGrid},
 };
 
 type Clipboard = Vec<Vec<Option<u32>>>;
-
-#[derive(Default, PartialEq)]
-enum Tool {
-    #[default]
-    Edit,
-    Select(SelectionCoords),
-}
 
 #[derive(Clone, Default)]
 pub enum TrackCellData {
@@ -231,25 +222,21 @@ struct TrackUIGridState {
 }
 
 pub struct TrackUI {
-    tool: Tool,
     _clipboard: Clipboard,
     grid_state: TrackUIGridState,
 
     cells_state: CellGrid<TrackCellData, TrackUIGridState>,
     grid_update_ts: Option<ProjectTimestamp>,
-
-    undo: UndoStack<Vec<Track>>,
 }
 
 impl Default for TrackUI {
     fn default() -> Self {
         Self {
-            tool: Tool::default(),
             _clipboard: Default::default(),
             grid_state: TrackUIGridState::default(),
             cells_state: CellGrid::new(CHAINS_PER_TRACK, 0),
             grid_update_ts: None,
-            undo: UndoStack::new(100),
+            //undo: UndoStack::new(100),
         }
     }
 }
@@ -257,8 +244,7 @@ impl Default for TrackUI {
 impl Page for TrackUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         ScrollArea::both().show(ui, |ui| {
-            self.undo.push(&project.tracks());
-
+            //self.undo.push(&project.tracks());
             self.handle_keybinds(ui);
             ui.horizontal(|ui| {
                 self.show_tracks(ui, state, project);
@@ -269,16 +255,6 @@ impl Page for TrackUI {
     }
 
     fn draw_side_buttons(&mut self, _ui: &mut Ui, _state: &mut AppUIState, _project: &Project) {}
-    fn handle_undo(&mut self, project: &Project) {
-        if let Some(previous) = self.undo.undo() {
-            previous.into_iter().enumerate().for_each(|(index, track)| {
-                project.push_event(ProjectEvent::UpdateTrack {
-                    index,
-                    new_track: Some(Box::new(track)),
-                });
-            });
-        }
-    }
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let chain_offset = self
