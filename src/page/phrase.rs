@@ -223,13 +223,11 @@ impl PhraseUI {
         }
 
         // abort if buffer is of the same phrase as is being viewed
-        if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone()) {
-            if let Some(buf_start) = first_notes.first() {
-                if Self::project_location_to_phrase_id(project, buf_start) == Some(s.phrase_id) {
+        if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone())
+            && let Some(buf_start) = first_notes.first()
+                && Self::project_location_to_phrase_id(project, buf_start) == Some(s.phrase_id) {
                     return;
                 }
-            }
-        }
 
         // update player buffer
         let Some(track_idx) = state.viewed_track else {
@@ -448,12 +446,11 @@ impl PhraseUI {
             }
         }
 
-        if btn.clicked() {
-            if let Some(semitone) = note.semitone() {
+        if btn.clicked()
+            && let Some(semitone) = note.semitone() {
                 *last_note_semitone = semitone;
                 note.set_semitone(None);
             }
-        }
 
         let Some(semitone) = note.semitone() else {
             return;

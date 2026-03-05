@@ -137,6 +137,16 @@ pub trait CellData<G> {
     /// extra action to perform when single-clicked
     fn on_click(&self, _grid_state: &mut G, _state: &mut AppUIState, _project: &Project) {}
 
+    /// only runs when this cell is highlighted
+    fn on_keyboard_input(
+        &self,
+        _input: &egui::InputState,
+        _grid_state: &mut G,
+        _state: &mut AppUIState,
+        _project: &Project,
+    ) {
+    }
+
     fn highlightable(&self) -> bool {
         true
     }
@@ -204,11 +214,11 @@ pub fn cells<T, G>(
 
     // handle keyboard input
     ui.input(|i| {
-        if i.key_pressed(state.preferences().keybinds.trigger_cell) {
-            if let Some(cell) = env.get(env.highlighted_row(), env.highlighted_col()) {
-                cell.trigger_action(grid_state, state, project);
-                return;
-            }
+        if i.key_pressed(state.preferences().keybinds.trigger_cell)
+            && let Some(cell) = env.get(env.highlighted_row(), env.highlighted_col())
+        {
+            cell.trigger_action(grid_state, state, project);
+            return;
         }
 
         let mut new_row = env.highlighted_row();
@@ -247,6 +257,8 @@ pub fn cells<T, G>(
     for row in 0..env.num_rows() {
         for column in 0..env.num_columns() {
             let cell_rect = rect_from_cell_pos(row, column, cell_size, grid_rect);
+            let cell_is_highlighted =
+                row == env.highlighted_row() && column == env.highlighted_col();
 
             if !ui.is_rect_visible(cell_rect) {
                 continue;
@@ -276,7 +288,7 @@ pub fn cells<T, G>(
             let text = cell_data.text();
             if let Some(text) = &text {
                 // drawing border
-                if row == env.highlighted_row() && column == env.highlighted_col() {
+                if cell_is_highlighted {
                     // highlighted
                     let stroke = Stroke::new(2.0, to_colour32(sel_col));
                     painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
@@ -322,11 +334,15 @@ pub fn cells<T, G>(
             }
 
             // scroll to the highlighted cell if it was changed by keyboard input
-            if should_scroll_to_highlighted
-                && row == env.highlighted_row()
-                && column == env.highlighted_col()
-            {
+            if should_scroll_to_highlighted && cell_is_highlighted {
                 ui.scroll_to_rect(cell_rect, Some(Align::Center));
+            }
+
+            // keyboard input
+            if cell_is_highlighted {
+                ui.input(|i| {
+                    cell_data.on_keyboard_input(i, grid_state, state, project);
+                });
             }
 
             // context menu
@@ -341,10 +357,7 @@ pub fn cells<T, G>(
             }
 
             // clicking and double clicking
-            if response.double_clicked()
-                && env.highlighted_row() == row
-                && env.highlighted_col() == column
-            {
+            if response.double_clicked() && cell_is_highlighted {
                 // trigger cell action
                 cell_data.trigger_action(grid_state, state, project);
                 env.selection = None;

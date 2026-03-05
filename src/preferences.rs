@@ -3,21 +3,13 @@ use egui::{Context, FontFamily, Stroke, TextStyle};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
+#[derive(Default)]
 pub struct Preferences {
     pub general: General,
     pub keybinds: Keybinds,
     pub style: Style,
 }
 
-impl Default for Preferences {
-    fn default() -> Self {
-        Self {
-            keybinds: Keybinds::default(),
-            style: Style::default(),
-            general: General::default(),
-        }
-    }
-}
 
 impl Preferences {
     pub fn load() -> Self {

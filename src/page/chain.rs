@@ -86,11 +86,10 @@ impl Page for ChainUI {
     }
 
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        if let Some(viewed_chain) = state.viewed_chain {
-            if !project.chains().contains_key(&viewed_chain) {
+        if let Some(viewed_chain) = state.viewed_chain
+            && !project.chains().contains_key(&viewed_chain) {
                 return;
             }
-        }
 
         self.up_down_side_buttons(ui, state, project);
         ui.add_sized([40.0, 20.0], Separator::default().horizontal());
@@ -238,13 +237,11 @@ impl ChainUI {
         }
 
         // abort if buffer is of the same phrase as is being viewed
-        if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone()) {
-            if let Some(buf_start) = first_notes.first() {
-                if Self::project_location_to_chain_id(project, buf_start) == Some(s.chain_id) {
+        if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone())
+            && let Some(buf_start) = first_notes.first()
+                && Self::project_location_to_chain_id(project, buf_start) == Some(s.chain_id) {
                     return;
                 }
-            }
-        }
 
         // update player buffer
         let Some(track_idx) = state.viewed_track else {
@@ -455,8 +452,8 @@ impl ChainUI {
                     break;
                 }
             }
-        } else if ui.input(|i| i.key_pressed(Key::D)) {
-            if let Some((max_key, _)) = project.phrases().iter().next_back() {
+        } else if ui.input(|i| i.key_pressed(Key::D))
+            && let Some((max_key, _)) = project.phrases().iter().next_back() {
                 for i in (*phrase + 1)..=*max_key {
                     if project.phrases().get(&i).is_some() {
                         *phrase = i;
@@ -464,7 +461,6 @@ impl ChainUI {
                     }
                 }
             }
-        }
     }
 
     fn button_context_menu(

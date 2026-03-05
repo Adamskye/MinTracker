@@ -4,17 +4,9 @@ use serde::{Deserialize, Serialize};
 
 pub const RECENT_FILES_MAX: usize = 10;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Cache {
     recent_files: VecDeque<PathBuf>,
-}
-
-impl Default for Cache {
-    fn default() -> Self {
-        Self {
-            recent_files: VecDeque::new(),
-        }
-    }
 }
 
 impl Cache {
@@ -41,6 +33,7 @@ impl Cache {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 

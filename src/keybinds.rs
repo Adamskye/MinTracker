@@ -8,6 +8,9 @@ pub struct Keybinds {
     pub left: Key,
     pub right: Key,
 
+    pub increase: Key,
+    pub decrease: Key,
+
     pub play_pause: Key,
 
     pub show_tracks: Key,
@@ -22,10 +25,13 @@ pub struct Keybinds {
 impl Default for Keybinds {
     fn default() -> Self {
         Self {
-            up: Key::ArrowUp,
-            down: Key::ArrowDown,
-            left: Key::ArrowLeft,
-            right: Key::ArrowRight,
+            up: Key::W,
+            down: Key::S,
+            left: Key::A,
+            right: Key::D,
+
+            increase: Key::Equals,
+            decrease: Key::Minus,
 
             play_pause: Key::Space,
 

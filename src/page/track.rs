@@ -4,6 +4,7 @@ use eframe::{
     egui::{Button, ComboBox, Context, DragValue, Grid, ScrollArea, Ui, Window},
     epaint::Color32,
 };
+use egui::Key;
 use egui_phosphor::regular;
 use itertools::Itertools;
 
@@ -75,16 +76,14 @@ impl CellData<TrackUIGridState> for TrackCellData {
         _state: &mut AppUIState,
         project: &Project,
     ) {
-        match self {
-            TrackCellData::ChainButton {
-                track_index,
-                chain_offset,
-                chain_id,
-                ..
-            } => {
-                Self::context_menu_chain(*track_index, *chain_offset, *chain_id, ui, project);
-            }
-            _ => {}
+        if let TrackCellData::ChainButton {
+            track_index,
+            chain_offset,
+            chain_id,
+            ..
+        } = self
+        {
+            Self::context_menu_chain(*track_index, *chain_offset, *chain_id, ui, project);
         }
     }
 
@@ -143,6 +142,59 @@ impl CellData<TrackUIGridState> for TrackCellData {
     fn selectable(&self) -> bool {
         matches!(self, TrackCellData::ChainButton { .. })
     }
+
+    fn on_keyboard_input(
+        &self,
+        input: &egui::InputState,
+        _grid_state: &mut TrackUIGridState,
+        _ui_state: &mut AppUIState,
+        project: &Project,
+    ) {
+        // increase/decrease chain offset (ignore shift for now)
+        let TrackCellData::ChainButton {
+            track_index,
+            chain_offset,
+            chain_id: Some(chain_id),
+        } = self
+        else {
+            return;
+        };
+
+        let new_chain = if input.key_pressed(Key::Equals)
+            && let Some((max_chain, _)) = project.chains().iter().next_back()
+        {
+            // increase offset
+            let mut new_chain = *chain_id;
+            for i in *chain_id + 1..=*max_chain {
+                if project.chains().get(&i).is_some() {
+                    new_chain = i;
+                    break;
+                }
+            }
+
+            new_chain
+        } else if input.key_pressed(Key::Minus) && *chain_id > 0 {
+            // decrease offset
+            let mut new_chain = *chain_id;
+            for i in (0..*chain_id).rev() {
+                if project.chains().get(&i).is_some() {
+                    new_chain = i;
+                    break;
+                }
+            }
+            new_chain
+        } else {
+            *chain_id
+        };
+
+        if new_chain != *chain_id {
+            project.push_event(ProjectEvent::UpdateTrackCell {
+                track_index: *track_index,
+                chain_offset: *chain_offset,
+                new_chain_id: Some(new_chain),
+            });
+        }
+    }
 }
 
 impl TrackCellData {
@@ -156,7 +208,7 @@ impl TrackCellData {
                 .playing
                 .get(*track_index)
                 .and_then(|opt| *opt)
-                .map_or(false, |position| position.chain_offset == *chain_offset),
+                .is_some_and(|position| position.chain_offset == *chain_offset),
             _ => false,
         }
     }

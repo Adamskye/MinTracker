@@ -143,11 +143,10 @@ impl WaveformGraph {
             });
         }
 
-        if ui.button("Load from WAV file").clicked() {
-            if let Some(dt) = Self::load_wav_file() {
+        if ui.button("Load from WAV file").clicked()
+            && let Some(dt) = Self::load_wav_file() {
                 *data_table = dt;
             }
-        }
     }
 
     fn draw_windows(&mut self, ui: &mut Ui, data_table: &mut InstrumentDataTable) {
@@ -233,8 +232,7 @@ impl WaveformGraph {
         if data_table.data.len() > 1
             && data_table.variant == InstrumentVariant::Normal
             && response.dragged_by(PointerButton::Primary)
-        {
-            if let Some(mouse_pos) = response.interact_pointer_pos() {
+            && let Some(mouse_pos) = response.interact_pointer_pos() {
                 // edit graph
                 let point_idx = ((mouse_pos.x - rect.left()) / point_spacing).round() as usize;
                 let value =
@@ -244,7 +242,6 @@ impl WaveformGraph {
                     *point = value.into();
                 }
             }
-        }
 
         response.widget_info(|| {
             WidgetInfo::selected(WidgetType::Other, ui.is_enabled(), response.hovered(), "")

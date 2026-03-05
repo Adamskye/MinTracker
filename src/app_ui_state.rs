@@ -30,6 +30,7 @@ impl AppUIState {
     pub fn new() -> Self {
         Self {
             preferences: Preferences::load(),
+            cache: Cache::load(),
             toasts: Toasts::new()
                 .anchor(Align2::RIGHT_TOP, (-10., 10.))
                 .order(egui::Order::Tooltip),

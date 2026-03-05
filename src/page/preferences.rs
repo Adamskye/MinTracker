@@ -132,69 +132,30 @@ impl PreferencesUI {
                 ui.end_row();
 
                 let kb = &ui_state.preferences().keybinds;
-                let rows: [(&str, Key, RebindFunc); _] = [
-                    ("Up", kb.up, Box::new(|kb, up| Keybinds { up, ..kb })),
-                    (
-                        "Down",
-                        kb.down,
-                        Box::new(|kb, down| Keybinds { down, ..kb }),
-                    ),
-                    (
-                        "Left",
-                        kb.left,
-                        Box::new(|kb, left| Keybinds { left, ..kb }),
-                    ),
-                    (
-                        "Right",
-                        kb.right,
-                        Box::new(|kb, right| Keybinds { right, ..kb }),
-                    ),
-                    (
-                        "Play/Pause",
-                        kb.play_pause,
-                        Box::new(|kb, play_pause| Keybinds { play_pause, ..kb }),
-                    ),
-                    (
-                        "Show Tracks",
-                        kb.show_tracks,
-                        Box::new(|kb, show_tracks| Keybinds { show_tracks, ..kb }),
-                    ),
-                    (
-                        "Show Chains",
-                        kb.show_chains,
-                        Box::new(|kb, show_chains| Keybinds { show_chains, ..kb }),
-                    ),
-                    (
-                        "Show Phrases",
-                        kb.show_phrases,
-                        Box::new(|kb, show_phrases| Keybinds { show_phrases, ..kb }),
-                    ),
-                    (
-                        "Show Instruments",
-                        kb.show_instruments,
-                        Box::new(|kb, show_instruments| Keybinds {
-                            show_instruments,
+                macro_rules! keybind_row {
+                    ($name:literal,$key:ident) => {
+                        let rebind_func = Box::new(|kb, new_key| Keybinds {
+                            $key: new_key,
                             ..kb
-                        }),
-                    ),
-                    (
-                        "Show Preferences",
-                        kb.show_preferences,
-                        Box::new(|kb, show_preferences| Keybinds {
-                            show_preferences,
-                            ..kb
-                        }),
-                    ),
-                    (
-                        "Trigger Cell",
-                        kb.trigger_cell,
-                        Box::new(|kb, trigger_cell| Keybinds { trigger_cell, ..kb }),
-                    ),
-                ];
+                        });
 
-                for (action_name, key, rebind_func) in rows {
-                    self.keybind_row(ui, action_name, key, rebind_func);
+                        self.keybind_row(ui, $name, kb.$key, rebind_func);
+                    };
                 }
+
+                keybind_row!("Up", up);
+                keybind_row!("Down", down);
+                keybind_row!("Left", left);
+                keybind_row!("Right", right);
+                keybind_row!("Increase", increase);
+                keybind_row!("Decrease", decrease);
+                keybind_row!("Play/Pause", play_pause);
+                keybind_row!("Show Tracks", show_tracks);
+                keybind_row!("Show Chains", show_chains);
+                keybind_row!("Show Phrases", show_phrases);
+                keybind_row!("Show Instruments", show_instruments);
+                keybind_row!("Show Preferences", show_preferences);
+                keybind_row!("Trigger Cell", trigger_cell);
             });
 
         if ui.button("Reset to Default").clicked() {

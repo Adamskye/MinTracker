@@ -97,21 +97,21 @@ impl Default for MinTracker {
 impl App for MinTracker {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         subsecond::call(|| {
-            self.handle_global_keybinds(&ctx);
+            self.handle_global_keybinds(ctx);
             self.update_project_events();
 
             if self.ui_state.player.is_playing() {
                 ctx.request_repaint()
             }
 
-            Self::set_style(&ctx);
+            Self::set_style(ctx);
             self.ui_state.preferences().style.apply(ctx);
 
             let window_fill = to_colour32(self.ui_state.preferences().style.colours.window_bg);
             let sidepanel_fill = window_fill.linear_multiply(1.3);
             let toppanel_fill = window_fill.linear_multiply(1.15);
 
-            let window_margin = self.ui_state.preferences().style.window_margin as i8;
+            let window_margin = self.ui_state.preferences().style.window_margin;
 
             egui::SidePanel::left("side_panel")
                 .resizable(false)
@@ -340,13 +340,10 @@ impl MinTracker {
                 let files: Vec<PathBuf> = self
                     .ui_state
                     .cache()
-                    .recent_files()
-                    .iter()
-                    .cloned()
-                    .collect();
+                    .recent_files().to_vec();
                 for recent in files {
                     if ui.button(&*recent.to_string_lossy()).clicked() {
-                        self.load(Some(PathBuf::from(recent)));
+                        self.load(Some(recent));
                     }
                 }
             })
@@ -460,7 +457,7 @@ impl MinTracker {
             return;
         };
 
-        page.update(ui, &mut self.ui_state, &*project);
+        page.update(ui, &mut self.ui_state, &project);
 
         ui.input(|i| {
             if i.key_pressed(Key::Z) && i.modifiers.ctrl {

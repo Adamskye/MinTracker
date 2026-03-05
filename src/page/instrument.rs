@@ -143,15 +143,14 @@ impl InstrumentUI {
             }
 
             // delete instrument
-            if let Some(id) = s.instrument_id {
-                if ui.button("Delete Instrument").clicked() {
+            if let Some(id) = s.instrument_id
+                && ui.button("Delete Instrument").clicked() {
                     project.push_event(ProjectEvent::UpdateInstrument {
                         id,
                         new_instrument: None,
                     });
                     state.viewed_instrument = None;
                 }
-            }
         });
     }
 
@@ -218,13 +217,12 @@ impl InstrumentUI {
 
         ui.separator();
 
-        if let Some(selected_dt) = s.selected_data_table {
-            if let Some(dt) = s.data_tables.get_mut(selected_dt) {
+        if let Some(selected_dt) = s.selected_data_table
+            && let Some(dt) = s.data_tables.get_mut(selected_dt) {
                 s.graph.waveform_graph(ui, dt);
                 ui.separator();
                 adsr_graph::adsr_graph(ui, &mut dt.new_envelope);
             }
-        }
 
         ui.separator();
 
@@ -232,13 +230,12 @@ impl InstrumentUI {
             Self::show_data_table_mapping(s, ui);
         });
 
-        if let Some(selected_dt) = s.selected_data_table {
-            if selected_dt < s.data_table_map.len() && ui.button("Apply to all notes").clicked() {
+        if let Some(selected_dt) = s.selected_data_table
+            && selected_dt < s.data_table_map.len() && ui.button("Apply to all notes").clicked() {
                 for mapping in &mut s.data_table_map {
                     *mapping = Some(selected_dt);
                 }
             }
-        }
 
         if ui.button("Apply Changes").clicked() {
             Self::apply(s, state, project)
@@ -277,11 +274,10 @@ impl InstrumentUI {
                             .unwrap_or("-".to_string()),
                     );
 
-                    if let Some(selected_dt) = s.selected_data_table {
-                        if selected_dt < s.data_tables.len() && btn_response.clicked() {
+                    if let Some(selected_dt) = s.selected_data_table
+                        && selected_dt < s.data_tables.len() && btn_response.clicked() {
                             *mapping = Some(selected_dt);
                         }
-                    }
 
                     if btn_response.secondary_clicked() {
                         *mapping = None;
