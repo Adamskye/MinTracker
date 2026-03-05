@@ -4,7 +4,7 @@ use egui::{Align2, WidgetText};
 use egui_phosphor::regular;
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 
-use crate::{page::PageID, preferences::Preferences, synth::Player};
+use crate::{cache::Cache, page::PageID, preferences::Preferences, synth::Player};
 
 #[derive(Default)]
 pub struct AppUIState {
@@ -23,6 +23,7 @@ pub struct AppUIState {
 
     toasts: Toasts,
     preferences: Preferences,
+    cache: Cache,
 }
 
 impl AppUIState {
@@ -42,7 +43,16 @@ impl AppUIState {
 
     pub fn modify_preferences(&mut self, f: impl FnOnce(&mut Preferences)) {
         f(&mut self.preferences);
-        confy::store("mintracker", "config", &self.preferences).unwrap();
+        self.preferences.save();
+    }
+
+    pub fn cache(&self) -> &Cache {
+        &self.cache
+    }
+
+    pub fn modify_cache(&mut self, f: impl FnOnce(&mut Cache)) {
+        f(&mut self.cache);
+        self.cache.save();
     }
 
     pub fn add_toast(&mut self, kind: ToastKind, msg: impl Into<WidgetText>) {

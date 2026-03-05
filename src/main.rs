@@ -1,5 +1,6 @@
 use std::{
     fs::File,
+    path::PathBuf,
     sync::{Arc, RwLock, mpsc},
 };
 
@@ -20,6 +21,7 @@ use project::{Project, ProjectEvent, ProjectSettings};
 use synth::{PlayerCmd, ROProject};
 
 mod app_ui_state;
+mod cache;
 mod effects_menu;
 mod file_handling;
 mod font_styling;
@@ -222,7 +224,7 @@ impl MinTracker {
                 self.save()
             }
             if i.key_pressed(Key::O) && i.modifiers.ctrl {
-                self.load()
+                self.load(None)
             }
         });
 
@@ -298,7 +300,7 @@ impl MinTracker {
                 .on_hover_text("Open (CTRL+O)")
                 .clicked()
             {
-                self.load()
+                self.load(None)
             }
             if ui
                 .button(egui_phosphor::regular::FLOPPY_DISK)
@@ -335,7 +337,18 @@ impl MinTracker {
 
         ui.horizontal(|ui| {
             ui.menu_button(regular::CLOCK_COUNTER_CLOCKWISE, |ui| {
-                if ui.button("Recent Projects").clicked() {}
+                let files: Vec<PathBuf> = self
+                    .ui_state
+                    .cache()
+                    .recent_files()
+                    .iter()
+                    .cloned()
+                    .collect();
+                for recent in files {
+                    if ui.button(&*recent.to_string_lossy()).clicked() {
+                        self.load(Some(PathBuf::from(recent)));
+                    }
+                }
             })
         });
 
@@ -497,11 +510,15 @@ impl MinTracker {
         }
     }
 
-    fn load(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+    fn load(&mut self, specific_path: Option<PathBuf>) {
+        let path = if let Some(path) = specific_path {
+            path
+        } else if let Some(path) = rfd::FileDialog::new()
             .add_filter("cbor", &["cbor"])
             .pick_file()
-        else {
+        {
+            path
+        } else {
             self.ui_state.add_toast(ToastKind::Info, "Load cancelled");
             return;
         };
@@ -515,6 +532,8 @@ impl MinTracker {
                 self.project = Arc::new(RwLock::new(proj));
                 self.ui_state.filepath = Some(path.clone());
                 self.ui_state.project_dirty = false;
+                self.ui_state
+                    .modify_cache(|cache| cache.add_recent_file(path));
                 self.ui_state
                     .add_toast(ToastKind::Success, "Project loaded");
             }
