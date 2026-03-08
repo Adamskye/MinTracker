@@ -1,20 +1,27 @@
-use std::sync::mpsc;
+use std::{
+    rc::Rc,
+    sync::{Arc, mpsc},
+};
 
 use eframe::{
     egui::{
-        util::undoer::{Settings, Undoer},
         Button, DragValue, Frame, Grid, Key, Response, RichText, ScrollArea, Sense, Separator, Ui,
+        util::undoer::{Settings, Undoer},
     },
     epaint::{Color32, Stroke},
 };
 use egui_phosphor::regular;
 
 use crate::{
+    AppUIState,
     page::{Page, PageID},
-    project::{Chain, ChainRow, Project, ProjectEvent, ProjectLocation, ROWS_PER_PHRASE},
+    project::{
+        Chain, ChainCmd, ChainRow, PhraseCmd, Project, ProjectLocation, ROWS_PER_CHAIN,
+        ROWS_PER_PHRASE,
+    },
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, PlayerScope, ROProject},
-    AppUIState,
+    widget::cells::{self, CellData, CellGrid},
 };
 
 type Clipboard = Vec<ChainRow>;
@@ -26,6 +33,256 @@ enum Tool {
     Select(SelectionCoords),
 }
 
+struct CellSharedState {}
+
+#[derive(Clone)]
+enum ChainCell {
+    Phrase { row: usize, id: Option<u32> },
+    Transpose { row: usize, transpose: f32 },
+}
+
+impl Default for ChainCell {
+    fn default() -> Self {
+        Self::Phrase { row: 0, id: None }
+    }
+}
+
+impl CellData<CellSharedState> for ChainCell {
+    fn text(&self) -> Option<String> {
+        match self {
+            ChainCell::Phrase { id: None, .. } => Some(regular::MINUS.into()),
+            ChainCell::Phrase { id: Some(idx), .. } => Some(idx.to_string()),
+            ChainCell::Transpose { transpose, .. } => Some(transpose.to_string()),
+        }
+    }
+
+    fn color(&self) -> Color32 {
+        Color32::TRANSPARENT
+    }
+
+    fn context_menu(
+        &self,
+        ui: &mut Ui,
+        _grid_state: &mut CellSharedState,
+        state: &mut AppUIState,
+        project: &Project,
+    ) {
+        match self {
+            ChainCell::Phrase { row, .. } => {
+                Self::context_menu_phrase(*row, ui, state, project);
+            }
+            ChainCell::Transpose { .. } => {}
+        }
+    }
+
+    fn trigger_action(
+        &self,
+        _grid_state: &mut CellSharedState,
+        state: &mut AppUIState,
+        project: &Project,
+    ) {
+        match self {
+            ChainCell::Phrase { row, id: Some(id) } => {
+                // go to phrase screen
+                state.chain_selected_row = Some(*row);
+                state.viewed_phrase = Some(*id);
+                state.current_page = PageID::Phrase;
+            }
+            ChainCell::Phrase { row, id: None } => {
+                // create phrase in chain
+                let Some((&id, _)) = project.phrases().iter().next() else {
+                    return;
+                };
+
+                let Some(chain_id) = state.viewed_chain else {
+                    return;
+                };
+
+                project.push_cmd(ChainCmd::UpdatePhrase {
+                    id: chain_id,
+                    row_index: *row,
+                    new_phrase_id: Some(id),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    fn on_keyboard_input(
+        &self,
+        input: &egui::InputState,
+        _grid_state: &mut CellSharedState,
+        state: &mut AppUIState,
+        project: &Project,
+    ) {
+        match self {
+            ChainCell::Phrase { row, id: Some(id) } => {
+                Self::keyboard_input_phrase(*row, *id, input, _grid_state, state, project)
+            }
+            ChainCell::Transpose { row, .. } => {
+                println!("{row}");
+                Self::keyboard_input_transpose(*row, input, _grid_state, state, project)
+            }
+            _ => {}
+        }
+    }
+}
+
+impl ChainCell {
+    fn context_menu_phrase(row: usize, ui: &mut Ui, ui_state: &AppUIState, project: &Project) {
+        // get viewed chain
+        // get current chain
+        let Some((viewed_chain, chain)) = ui_state
+            .viewed_chain
+            .and_then(|id| project.chains().get(&id).map(|c| (id, c)))
+        else {
+            return;
+        };
+
+        if ui.button("Create Phrase").clicked() {
+            ui.close();
+            let id = Project::get_unique_key(project.phrases());
+            let mut chain = chain.clone();
+            if let Some(row) = chain.rows.get_mut(row) {
+                row.phrase = Some(id);
+            }
+
+            // create phrase
+            project.push_cmd(PhraseCmd::Update {
+                id,
+                new_phrase: Default::default(),
+            });
+
+            // add it to chain
+            project.push_cmd(ChainCmd::UpdatePhrase {
+                id: viewed_chain,
+                row_index: row,
+                new_phrase_id: Some(id),
+            });
+        }
+
+        if let Some(phrase) = chain.rows.get(row).and_then(|r| r.phrase) {
+            if ui.button("Delete").clicked() {
+                ui.close();
+                let mut chain = chain.clone();
+                if let Some(row) = chain.rows.get_mut(row) {
+                    row.phrase = None;
+                }
+
+                project.push_cmd(ChainCmd::UpdatePhrase {
+                    id: viewed_chain,
+                    row_index: row,
+                    new_phrase_id: None,
+                });
+            }
+
+            if ui.button("Clone").clicked() {
+                ui.close();
+                let mut chain = chain.clone();
+
+                // clone phrase
+                let new_id = Project::get_unique_key(project.phrases());
+                if let Some(row) = chain.rows.get_mut(row) {
+                    let new_phrase = project.phrases().get(&phrase).cloned().map(Box::new);
+                    if let Some(new_phrase) = new_phrase {
+                        project.push_cmd(PhraseCmd::Update {
+                            id: new_id,
+                            new_phrase: *new_phrase,
+                        });
+                        row.phrase = Some(new_id);
+                    }
+                }
+
+                // update chain to include new phrase
+                project.push_cmd(ChainCmd::UpdatePhrase {
+                    id: viewed_chain,
+                    row_index: row,
+                    new_phrase_id: Some(new_id),
+                });
+            }
+        }
+    }
+
+    fn keyboard_input_phrase(
+        row: usize,
+        mut id: u32,
+        input: &egui::InputState,
+        _grid_state: &mut CellSharedState,
+        state: &mut AppUIState,
+        project: &Project,
+    ) {
+        let inc_keybind = state.preferences().keybinds.increase;
+        let dec_keybind = state.preferences().keybinds.decrease;
+        let original_id = id;
+
+        if input.key_pressed(dec_keybind) {
+            for i in (0..id).rev() {
+                if project.phrases().get(&i).is_some() {
+                    id = i;
+                    break;
+                }
+            }
+        } else if input.key_pressed(inc_keybind)
+            && let Some((max_key, _)) = project.phrases().iter().next_back()
+        {
+            for i in (id + 1)..=*max_key {
+                if project.phrases().get(&i).is_some() {
+                    id = i;
+                    break;
+                }
+            }
+        }
+
+        if id != original_id {
+            // if id of phrase was changed, update the chain
+            project.push_cmd(ChainCmd::UpdatePhrase {
+                id: state.viewed_chain.unwrap(),
+                row_index: row,
+                new_phrase_id: Some(id),
+            });
+        }
+    }
+
+    fn keyboard_input_transpose(
+        row: usize,
+        input: &egui::InputState,
+        _grid_state: &mut CellSharedState,
+        state: &mut AppUIState,
+        project: &Project,
+    ) {
+        let inc_keybind = state.preferences().keybinds.increase;
+        let dec_keybind = state.preferences().keybinds.decrease;
+        let change = if input.key_pressed(inc_keybind) {
+            1.0
+        } else if input.key_pressed(dec_keybind) {
+            -1.0
+        } else {
+            return;
+        };
+
+        let viewed_chain = match state.viewed_chain {
+            Some(id) => id,
+            None => return,
+        };
+
+        project.push_cmd(ChainCmd::UpdateTranspose {
+            id: viewed_chain,
+            row_index: row,
+            new_transpose: change,
+        });
+
+        // project.push_event(ProjectEvent::UpdateChainNew {
+        //     id: viewed_chain,
+        //     new_chain: Arc::new(move |mut chain| {
+        //         if let Some(row) = chain.rows.get_mut(row) {
+        //             row.transpose += change;
+        //         }
+        //         chain
+        //     }),
+        // });
+    }
+}
+
 #[derive(Clone, PartialEq, Default)]
 pub struct ChainUIState {
     chain: Chain,
@@ -34,9 +291,9 @@ pub struct ChainUIState {
 
 pub struct ChainUI {
     local_state: ChainUIState,
-    tool: Tool,
     clipboard: Clipboard,
     undoer: Undoer<ChainUIState>,
+    cell_grid: CellGrid<ChainCell, CellSharedState>,
 }
 
 impl Default for ChainUI {
@@ -47,8 +304,8 @@ impl Default for ChainUI {
                 stable_time: 0.1,
                 ..Default::default()
             }),
-            tool: Default::default(),
             clipboard: Default::default(),
+            cell_grid: CellGrid::new(ROWS_PER_CHAIN, 2),
         }
     }
 }
@@ -57,23 +314,10 @@ impl Page for ChainUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         let chain_opt = state.viewed_chain.and_then(|id| project.chains().get(&id));
 
-        Self::handle_player_buffer(&self.local_state, state, project);
+        //Self::handle_player_buffer(&self.local_state, state, project);
         ScrollArea::vertical().show(ui, |ui| {
-            if let (Some(chain), Some(id)) = (chain_opt, state.viewed_chain) {
-                if self.local_state.chain != *chain {
-                    self.local_state.chain = chain.clone();
-                }
-                self.local_state.chain_id = id;
-
-                Self::handle_keybinds(ui, &mut self.tool);
+            if chain_opt.is_some() {
                 self.show_phrase_list(ui, state, project);
-
-                if self.local_state.chain != *chain {
-                    project.push_event(ProjectEvent::UpdateChain {
-                        id: self.local_state.chain_id,
-                        new_chain: Box::new(self.local_state.chain.clone()),
-                    })
-                }
             } else {
                 ui.label("No valid chain selected");
             }
@@ -87,38 +331,15 @@ impl Page for ChainUI {
 
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         if let Some(viewed_chain) = state.viewed_chain
-            && !project.chains().contains_key(&viewed_chain) {
-                return;
-            }
-
-        self.up_down_side_buttons(ui, state, project);
-        ui.add_sized([40.0, 20.0], Separator::default().horizontal());
-
-        // tool select
-        let selection = if let Tool::Select(selection) = self.tool {
-            selection
-        } else {
-            None
-        };
-
-        ui.selectable_value(&mut self.tool, Tool::Edit, "Edit");
-        ui.selectable_value(&mut self.tool, Tool::Select(selection), "Select");
-    }
-
-    fn handle_undo(&mut self, project: &Project) {
-        let Some(new_state) = self.undoer.undo(&self.local_state) else {
+            && !project.chains().contains_key(&viewed_chain)
+        {
             return;
-        };
-
-        if self.local_state.chain != new_state.chain {
-            project.push_event(ProjectEvent::UpdateChain {
-                id: new_state.chain_id,
-                new_chain: Box::new(new_state.chain.clone()),
-            });
         }
 
-        self.local_state = new_state.clone();
+        self.up_down_side_buttons(ui, state, project);
     }
+
+    fn handle_undo(&mut self, project: &Project) {}
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let (Some(track_idx), Some(chain_offset)) = (state.viewed_track, state.track_selected_row)
@@ -132,16 +353,11 @@ impl Page for ChainUI {
             return;
         };
 
-        let phrase_offset = match self.tool {
-            Tool::Select(Some(((_, row1), (_, row2)))) => std::cmp::min(row1, row2),
-            _ => 0,
-        };
-
         let scope = PlayerScope {
             first_notes: vec![ProjectLocation {
                 track_idx,
                 chain_offset,
-                phrase_offset,
+                phrase_offset: self.cell_grid.highlighted_row(),
                 note_offset: 0,
             }]
             .into(),
@@ -239,9 +455,10 @@ impl ChainUI {
         // abort if buffer is of the same phrase as is being viewed
         if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone())
             && let Some(buf_start) = first_notes.first()
-                && Self::project_location_to_chain_id(project, buf_start) == Some(s.chain_id) {
-                    return;
-                }
+            && Self::project_location_to_chain_id(project, buf_start) == Some(s.chain_id)
+        {
+            return;
+        }
 
         // update player buffer
         let Some(track_idx) = state.viewed_track else {
@@ -275,60 +492,46 @@ impl ChainUI {
             .send_command(PlayerCmd::UpdateBuffer(new_buffer));
     }
 
-    fn handle_keybinds(ui: &mut Ui, tool: &mut Tool) {
-        if ui.input(|i| i.key_pressed(Key::E)) {
-            *tool = Tool::Edit;
-        } else if ui.input(|i| i.key_pressed(Key::S)) {
-            *tool = Tool::Select(None);
-        }
-    }
-
-    fn show_phrase_list(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
+    fn show_phrase_list(&mut self, ui: &mut Ui, ui_state: &mut AppUIState, project: &Project) {
         let (tx, rx) = mpsc::channel();
-        state.player.send_command(PlayerCmd::RequestLocation(tx));
+        ui_state.player.send_command(PlayerCmd::RequestLocation(tx));
         let position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
 
-        Grid::new("chain_ui_phrase_grid")
-            .num_columns(3)
-            .striped(true)
-            .show(ui, |ui| {
-                ui.label("");
-                ui.label("Phrases");
-                ui.label("Transpose");
-                ui.end_row();
+        // add phrases to cell grid
 
-                for row in 0..self.local_state.chain.rows.len() {
-                    Self::position_indicator(ui, &position_opt, state, row);
-                    let btn_response = self.phrase_button_no_interaction(ui, row);
-                    self.transpose(ui, row);
+        let Some(chain) = ui_state
+            .viewed_chain
+            .and_then(|chain_id| project.chains().get(&chain_id))
+        else {
+            return;
+        };
 
-                    ui.end_row();
+        for (row_idx, row) in chain.rows.iter().enumerate() {
+            self.cell_grid.set(
+                row_idx,
+                0,
+                ChainCell::Phrase {
+                    row: row_idx,
+                    id: row.phrase,
+                },
+            );
+            self.cell_grid.set(
+                row_idx,
+                1,
+                ChainCell::Transpose {
+                    row: row_idx,
+                    transpose: row.transpose,
+                },
+            );
+        }
 
-                    let Some(btn_response) = btn_response else {
-                        continue;
-                    };
-                    match &mut self.tool {
-                        Tool::Edit => Self::phrase_button_interaction(
-                            ui,
-                            &mut self.local_state,
-                            state,
-                            project,
-                            btn_response,
-                            row,
-                        ),
-                        Tool::Select(selection) => {
-                            selection::handle_widget_selecting(
-                                ui,
-                                selection,
-                                &btn_response,
-                                row,
-                                0,
-                            );
-                            self.selection_context_menu(&btn_response, row);
-                        }
-                    };
-                }
-            });
+        cells::cells(
+            ui,
+            &mut self.cell_grid,
+            &mut CellSharedState {},
+            ui_state,
+            project,
+        );
     }
 
     fn position_indicator(
@@ -355,190 +558,6 @@ impl ChainUI {
         });
 
         ui.label(pos_indicator);
-    }
-
-    fn phrase_button_no_interaction(&self, ui: &mut Ui, row: usize) -> Option<Response> {
-        let phrase = self.local_state.chain.rows.get(row).map(|row| row.phrase)?;
-
-        let label = match phrase {
-            Some(p) => p.to_string(),
-            None => "-".to_string(),
-        };
-
-        let selected = if let Tool::Select(selection) = &self.tool {
-            selection::widget_in_selection(selection, row, 0)
-        } else {
-            false
-        };
-
-        let btn = if selected {
-            Button::new(label).stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
-        } else {
-            Button::new(label)
-        }
-        .corner_radius(0.0)
-        .fill(Color32::TRANSPARENT)
-        .sense(Sense::click_and_drag());
-
-        Some(ui.add_sized([40.0, 20.0], btn))
-    }
-
-    fn transpose(&mut self, ui: &mut Ui, row: usize) {
-        let Some(chain_row) = self.local_state.chain.rows.get_mut(row) else {
-            return;
-        };
-
-        let selected = if let Tool::Select(selection) = &self.tool {
-            selection::widget_in_selection(selection, row, 0)
-        } else {
-            false
-        };
-
-        if selected {
-            Frame::new().stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
-        } else {
-            Frame::new()
-        }
-        .show(ui, |ui| {
-            ui.add_sized(
-                [40.0, 20.0],
-                DragValue::new(&mut chain_row.transpose).speed(1.0),
-            );
-        });
-    }
-
-    fn phrase_button_interaction(
-        ui: &mut Ui,
-        s: &mut ChainUIState,
-        state: &mut AppUIState,
-        project: &Project,
-        response: Response,
-        row: usize,
-    ) {
-        {
-            let Some(phrase) = s.chain.rows.get_mut(row).map(|row| &mut row.phrase) else {
-                return;
-            };
-
-            if response.clicked() && phrase.is_some() {
-                state.chain_selected_row = Some(row);
-                state.viewed_phrase = *phrase;
-                state.current_page = PageID::Phrase;
-            }
-            if response.clicked() && phrase.is_none() {
-                *phrase = project.phrases().iter().next().map(|p| *p.0);
-            }
-        }
-
-        Self::button_context_menu(s, project, &response, row);
-
-        if !response.hovered() {
-            return;
-        }
-
-        let Some(phrase) = s
-            .chain
-            .rows
-            .get_mut(row)
-            .and_then(|row| row.phrase.as_mut())
-        else {
-            return;
-        };
-
-        if ui.input(|i| i.key_pressed(Key::A)) {
-            for i in (0..*phrase).rev() {
-                if project.phrases().get(&i).is_some() {
-                    *phrase = i;
-                    break;
-                }
-            }
-        } else if ui.input(|i| i.key_pressed(Key::D))
-            && let Some((max_key, _)) = project.phrases().iter().next_back() {
-                for i in (*phrase + 1)..=*max_key {
-                    if project.phrases().get(&i).is_some() {
-                        *phrase = i;
-                        break;
-                    }
-                }
-            }
-    }
-
-    fn button_context_menu(
-        s: &mut ChainUIState,
-        project: &Project,
-        response: &Response,
-        row: usize,
-    ) {
-        response.context_menu(|ui| {
-            let Some(phrase) = s
-                .chain
-                .rows
-                .get_mut(row)
-                .map(|chain_row| &mut chain_row.phrase)
-            else {
-                return;
-            };
-
-            if ui.button("Create Phrase").clicked() {
-                ui.close();
-                let id = Project::get_unique_key(project.phrases());
-                project.push_event(ProjectEvent::UpdatePhrase {
-                    id,
-                    new_phrase: Default::default(),
-                });
-                *phrase = Some(id);
-            }
-
-            if ui.button("Delete").clicked() {
-                ui.close();
-                *phrase = None;
-            }
-
-            if ui.button("Clone").clicked() {
-                ui.close();
-                Self::clone_phrase(phrase, project);
-            }
-        });
-    }
-
-    fn selection_context_menu(&mut self, response: &Response, row: usize) {
-        let Tool::Select(Some((coord1, coord2))) = self.tool else {
-            return;
-        };
-
-        response.context_menu(|ui| {
-            if ui.button("Delete").clicked() {
-                ui.close();
-
-                Self::delete_selection(&mut self.local_state.chain, coord1.1, coord2.1)
-            }
-
-            if ui.button("Cut").clicked() {
-                ui.close();
-                Self::copy_selection(
-                    &mut self.local_state.chain,
-                    &mut self.clipboard,
-                    coord1.1,
-                    coord2.1,
-                );
-                Self::delete_selection(&mut self.local_state.chain, coord1.1, coord2.1);
-            }
-
-            if ui.button("Copy").clicked() {
-                ui.close();
-                Self::copy_selection(
-                    &mut self.local_state.chain,
-                    &mut self.clipboard,
-                    coord1.1,
-                    coord2.1,
-                );
-            }
-
-            if ui.button("Paste").clicked() {
-                ui.close();
-                Self::paste_selection(&mut self.local_state.chain, &self.clipboard, row);
-            }
-        });
     }
 
     fn up_down_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
@@ -609,19 +628,14 @@ impl ChainUI {
         let Some(new_phrase) = phrase_id_opt
             .and_then(|phrase_id| project.phrases().get(&phrase_id))
             .cloned()
-            .map(Box::new)
         else {
             return;
         };
 
         let id = Project::get_unique_key(project.phrases());
-        project.push_event(ProjectEvent::UpdatePhrase { id, new_phrase });
+        //project.push_event(ProjectEvent::UpdatePhrase { id, new_phrase });
+        project.push_cmd(PhraseCmd::Update { id, new_phrase });
+
         *phrase_id_opt = Some(id);
-
-        //let Some(phrase_id) = phrase_id_opt else {
-        //    return;
-        //};
-
-        //let phrase =
     }
 }

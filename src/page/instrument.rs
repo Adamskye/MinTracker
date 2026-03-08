@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self,
+    self, ComboBox, Label, TextWrapMode, Ui,
     util::undoer::{Settings, Undoer},
-    ComboBox, Label, TextWrapMode, Ui,
 };
 
 use crate::{
-    page::Page,
-    project::{Instrument, InstrumentDataTable, Note, Project, ProjectEvent, NUM_SEMITONES},
-    widget::{adsr_graph, waveform_graph::WaveformGraph},
     AppUIState,
+    page::Page,
+    project::{Instrument, InstrumentCmd, InstrumentDataTable, NUM_SEMITONES, Note, Project},
+    widget::{adsr_graph, waveform_graph::WaveformGraph},
 };
 
 #[derive(PartialEq, Clone)]
@@ -135,7 +134,7 @@ impl InstrumentUI {
             // new instrument
             if ui.button("New Instrument").clicked() {
                 let id = Project::get_unique_key(project.instruments());
-                project.push_event(ProjectEvent::UpdateInstrument {
+                project.push_cmd(InstrumentCmd::Update {
                     id,
                     new_instrument: Some(Default::default()),
                 });
@@ -144,13 +143,14 @@ impl InstrumentUI {
 
             // delete instrument
             if let Some(id) = s.instrument_id
-                && ui.button("Delete Instrument").clicked() {
-                    project.push_event(ProjectEvent::UpdateInstrument {
-                        id,
-                        new_instrument: None,
-                    });
-                    state.viewed_instrument = None;
-                }
+                && ui.button("Delete Instrument").clicked()
+            {
+                project.push_cmd(InstrumentCmd::Update {
+                    id,
+                    new_instrument: None,
+                });
+                state.viewed_instrument = None;
+            }
         });
     }
 
@@ -218,11 +218,12 @@ impl InstrumentUI {
         ui.separator();
 
         if let Some(selected_dt) = s.selected_data_table
-            && let Some(dt) = s.data_tables.get_mut(selected_dt) {
-                s.graph.waveform_graph(ui, dt);
-                ui.separator();
-                adsr_graph::adsr_graph(ui, &mut dt.new_envelope);
-            }
+            && let Some(dt) = s.data_tables.get_mut(selected_dt)
+        {
+            s.graph.waveform_graph(ui, dt);
+            ui.separator();
+            adsr_graph::adsr_graph(ui, &mut dt.new_envelope);
+        }
 
         ui.separator();
 
@@ -231,11 +232,13 @@ impl InstrumentUI {
         });
 
         if let Some(selected_dt) = s.selected_data_table
-            && selected_dt < s.data_table_map.len() && ui.button("Apply to all notes").clicked() {
-                for mapping in &mut s.data_table_map {
-                    *mapping = Some(selected_dt);
-                }
+            && selected_dt < s.data_table_map.len()
+            && ui.button("Apply to all notes").clicked()
+        {
+            for mapping in &mut s.data_table_map {
+                *mapping = Some(selected_dt);
             }
+        }
 
         if ui.button("Apply Changes").clicked() {
             Self::apply(s, state, project)
@@ -275,9 +278,11 @@ impl InstrumentUI {
                     );
 
                     if let Some(selected_dt) = s.selected_data_table
-                        && selected_dt < s.data_tables.len() && btn_response.clicked() {
-                            *mapping = Some(selected_dt);
-                        }
+                        && selected_dt < s.data_tables.len()
+                        && btn_response.clicked()
+                    {
+                        *mapping = Some(selected_dt);
+                    }
 
                     if btn_response.secondary_clicked() {
                         *mapping = None;
@@ -322,7 +327,7 @@ impl InstrumentUI {
             data_table_map: s.data_table_map,
         };
 
-        project.push_event(ProjectEvent::UpdateInstrument {
+        project.push_cmd(InstrumentCmd::Update {
             id,
             new_instrument: Some(Box::new(instrument)),
         });

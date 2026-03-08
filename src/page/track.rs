@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 use eframe::{
     egui::{Button, ComboBox, Context, DragValue, Grid, ScrollArea, Ui, Window},
@@ -9,9 +9,12 @@ use egui_phosphor::regular;
 use itertools::Itertools;
 
 use crate::{
-    AppUIState, ProjectEvent,
+    AppUIState,
     page::{Page, PageID},
-    project::{CHAINS_PER_TRACK, Project, ProjectLocation, ProjectTimestamp, Track},
+    project::{
+        CHAINS_PER_TRACK, Chain, ChainCmd, PhraseCmd, Project, ProjectLocation, ProjectTimestamp,
+        Track, TracksCmd,
+    },
     synth::{PlayerCmd, PlayerScope, ROProject},
     widget::cells::{self, CellData, CellGrid},
 };
@@ -109,7 +112,7 @@ impl CellData<TrackUIGridState> for TrackCellData {
                     ui_state.current_page = PageID::Chain;
                 } else {
                     // put a chain here
-                    project.push_event(ProjectEvent::UpdateTrackCell {
+                    project.push_cmd(TracksCmd::UpdateTrackCell {
                         track_index: *track_index,
                         chain_offset: *chain_offset,
                         new_chain_id: project.chains().iter().next().map(|(id, _)| *id),
@@ -188,7 +191,7 @@ impl CellData<TrackUIGridState> for TrackCellData {
         };
 
         if new_chain != *chain_id {
-            project.push_event(ProjectEvent::UpdateTrackCell {
+            project.push_cmd(TracksCmd::UpdateTrackCell {
                 track_index: *track_index,
                 chain_offset: *chain_offset,
                 new_chain_id: Some(new_chain),
@@ -223,11 +226,11 @@ impl TrackCellData {
         if ui.button("Create Chain").clicked() {
             ui.close();
             let id = Project::get_unique_key(project.chains());
-            project.push_event(ProjectEvent::UpdateChain {
+            project.push_cmd(ChainCmd::Update {
                 id,
-                new_chain: Default::default(),
+                new_chain: Chain::default(),
             });
-            project.push_event(ProjectEvent::UpdateTrackCell {
+            project.push_cmd(TracksCmd::UpdateTrackCell {
                 track_index,
                 chain_offset,
                 new_chain_id: Some(id),
@@ -236,7 +239,7 @@ impl TrackCellData {
         if let Some(chain_id) = chain_id_opt {
             if ui.button("Delete Chain").clicked() {
                 ui.close();
-                project.push_event(ProjectEvent::UpdateTrackCell {
+                project.push_cmd(TracksCmd::UpdateTrackCell {
                     track_index,
                     chain_offset,
                     new_chain_id: None,
@@ -247,7 +250,7 @@ impl TrackCellData {
                 ui.close();
 
                 let id = shallow_clone(chain_id, project);
-                project.push_event(ProjectEvent::UpdateTrackCell {
+                project.push_cmd(TracksCmd::UpdateTrackCell {
                     track_index,
                     chain_offset,
                     new_chain_id: Some(id),
@@ -257,7 +260,7 @@ impl TrackCellData {
             if ui.button("Deep Clone").clicked() {
                 ui.close();
                 let id = deep_clone(chain_id, project);
-                project.push_event(ProjectEvent::UpdateTrackCell {
+                project.push_cmd(TracksCmd::UpdateTrackCell {
                     track_index,
                     chain_offset,
                     new_chain_id: Some(id),
@@ -416,7 +419,7 @@ impl TrackUI {
 
         ui.vertical(|ui| {
             if ui.button(format!("{} New Track", regular::PLUS)).clicked() {
-                project.push_event(ProjectEvent::UpdateTrack {
+                project.push_cmd(TracksCmd::UpdateTrack {
                     index: project.tracks().len(),
                     new_track: Some(Box::new(Track::default())),
                 });
@@ -528,12 +531,14 @@ impl TrackUI {
             });
 
         if to_remove && track_num < project.tracks().len() {
-            project.push_event(ProjectEvent::UpdateTrack {
+            // remove track
+            project.push_cmd(TracksCmd::UpdateTrack {
                 index: track_num,
                 new_track: None,
             });
         } else if settings != track.settings {
-            project.push_event(ProjectEvent::UpdateTrackSettings {
+            // update settings
+            project.push_cmd(TracksCmd::UpdateTrackSettings {
                 index: track_num,
                 new_settings: settings,
             });
@@ -630,20 +635,18 @@ impl TrackUI {
             })
             .collect::<Vec<Track>>();
 
-        project.push_event(ProjectEvent::UpdateTracks { new_tracks });
+        project.push_cmd(TracksCmd::Update { new_tracks });
     }
 }
 
 fn shallow_clone(chain_id: u32, project: &Project) -> u32 {
-    let Some(chain) = project.chains().get(&chain_id) else {
+    let Some(new_chain) = project.chains().get(&chain_id).cloned() else {
         return chain_id;
     };
 
     // clone the thing
-    let new_chain = Box::new(chain.clone());
     let id = Project::get_unique_key(project.chains());
-    project.push_event(ProjectEvent::UpdateChain { id, new_chain });
-
+    project.push_cmd(ChainCmd::Update { id, new_chain });
     id
 }
 
@@ -667,10 +670,9 @@ fn deep_clone(chain_id: u32, project: &Project) -> u32 {
                 .phrases()
                 .get(&unique_id)
                 .cloned()
-                .map(Box::new)
                 .unwrap_or_default();
 
-            project.push_event(ProjectEvent::UpdatePhrase {
+            project.push_cmd(PhraseCmd::Update {
                 id: new_id,
                 new_phrase,
             });
@@ -684,9 +686,9 @@ fn deep_clone(chain_id: u32, project: &Project) -> u32 {
 
     // add the chain
     let new_chain_id = Project::get_unique_key(project.chains());
-    project.push_event(ProjectEvent::UpdateChain {
+    project.push_cmd(ChainCmd::Update {
         id: new_chain_id,
-        new_chain: Box::new(new_chain),
+        new_chain,
     });
 
     new_chain_id

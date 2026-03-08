@@ -9,6 +9,7 @@ use crate::{
     font_styling::FontStylingEx,
     helpers::to_colour32,
     page::{PageID, Pages},
+    project::ProjectCmd,
 };
 use eframe::{
     App,
@@ -17,7 +18,7 @@ use eframe::{
 use egui::{Align, Color32, Context, Frame, Layout, RichText, Sense, Vec2};
 use egui_phosphor::regular;
 use egui_toast::ToastKind;
-use project::{Project, ProjectEvent, ProjectSettings};
+use project::{Project, ProjectSettings};
 use synth::{PlayerCmd, ROProject};
 
 mod app_ui_state;
@@ -178,7 +179,7 @@ impl MinTracker {
             return;
         };
 
-        let (changed, messages) = project.handle_events();
+        let (changed, messages) = project.handle_cmds();
         if changed {
             self.ui_state.project_dirty = true;
         }
@@ -234,7 +235,7 @@ impl MinTracker {
         };
         ctx.input(|i| {
             if i.key_pressed(Key::Z) && i.modifiers.ctrl {
-                project.push_event(ProjectEvent::Undo);
+                project.push_cmd(ProjectCmd::Undo);
             }
         });
     }
@@ -317,7 +318,7 @@ impl MinTracker {
                 self.project
                     .read()
                     .unwrap()
-                    .push_event(ProjectEvent::CleanUnusedNotes)
+                    .push_cmd(ProjectCmd::CleanUnusedNotes);
             }
 
             if ui
@@ -337,10 +338,7 @@ impl MinTracker {
 
         ui.horizontal(|ui| {
             ui.menu_button(regular::CLOCK_COUNTER_CLOCKWISE, |ui| {
-                let files: Vec<PathBuf> = self
-                    .ui_state
-                    .cache()
-                    .recent_files().to_vec();
+                let files: Vec<PathBuf> = self.ui_state.cache().recent_files().to_vec();
                 for recent in files {
                     if ui.button(&*recent.to_string_lossy()).clicked() {
                         self.load(Some(recent));
@@ -363,7 +361,7 @@ impl MinTracker {
                     tempo: tempo_value,
                     ..settings.clone()
                 };
-                proj.push_event(ProjectEvent::UpdateSettings(new_settings));
+                proj.push_cmd(ProjectCmd::UpdateSettings(new_settings));
             }
         });
 
@@ -376,7 +374,7 @@ impl MinTracker {
                     transpose: transpose_value,
                     ..settings.clone()
                 };
-                proj.push_event(ProjectEvent::UpdateSettings(new_settings));
+                proj.push_cmd(ProjectCmd::UpdateSettings(new_settings));
             }
         });
 
@@ -420,7 +418,7 @@ impl MinTracker {
 
             let loop_button = Button::selectable(settings.loop_player, regular::REPEAT);
             if ui.add(loop_button).clicked() {
-                proj.push_event(ProjectEvent::UpdateSettings(ProjectSettings {
+                proj.push_cmd(ProjectCmd::UpdateSettings(ProjectSettings {
                     loop_player: !settings.loop_player,
                     ..settings.clone()
                 }));

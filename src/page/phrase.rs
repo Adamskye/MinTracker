@@ -2,23 +2,20 @@ use std::sync::mpsc;
 
 use eframe::{
     egui::{
-        self,
+        self, Button, Key, Label, Response, RichText, ScrollArea, Sense, Ui,
         util::undoer::{Settings, Undoer},
-        Button, Key, Label, Response, RichText, ScrollArea, Sense, Ui,
     },
     epaint::{Color32, Stroke},
 };
 use egui_phosphor::regular;
 
 use crate::{
+    AppUIState,
     effects_menu::EffectsMenu,
     page::Page,
-    project::{
-        Note, Phrase, Project, ProjectEvent, ProjectLocation, MID_A_SEMITONE, ROWS_PER_PHRASE,
-    },
+    project::{MID_A_SEMITONE, Note, Phrase, PhraseCmd, Project, ProjectLocation, ROWS_PER_PHRASE},
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, PlayerScope, ROProject},
-    AppUIState,
 };
 
 type Clipboard = Vec<Vec<Note>>;
@@ -87,13 +84,6 @@ impl Page for PhraseUI {
 
                 self.handle_keybinds(ui);
                 self.show_voices(ui, project, state);
-
-                if self.local_state.phrase != *phrase {
-                    project.push_event(ProjectEvent::UpdatePhrase {
-                        id,
-                        new_phrase: Box::new(self.local_state.phrase.clone()),
-                    });
-                }
             } else {
                 ui.label("No valid phrase selected");
             }
@@ -120,20 +110,7 @@ impl Page for PhraseUI {
         ui.selectable_value(&mut self.tool, Tool::Select(selection), "Select");
     }
 
-    fn handle_undo(&mut self, project: &Project) {
-        let Some(new_state) = self.undoer.undo(&self.local_state) else {
-            return;
-        };
-
-        if self.local_state.phrase != new_state.phrase {
-            project.push_event(ProjectEvent::UpdatePhrase {
-                id: new_state.phrase_id,
-                new_phrase: Box::new(new_state.phrase.clone()),
-            });
-        }
-
-        self.local_state = new_state.clone();
-    }
+    fn handle_undo(&mut self, project: &Project) {}
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let (Some(track_idx), Some(chain_offset), Some(phrase_offset)) = (
@@ -225,9 +202,10 @@ impl PhraseUI {
         // abort if buffer is of the same phrase as is being viewed
         if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone())
             && let Some(buf_start) = first_notes.first()
-                && Self::project_location_to_phrase_id(project, buf_start) == Some(s.phrase_id) {
-                    return;
-                }
+            && Self::project_location_to_phrase_id(project, buf_start) == Some(s.phrase_id)
+        {
+            return;
+        }
 
         // update player buffer
         let Some(track_idx) = state.viewed_track else {
@@ -447,10 +425,11 @@ impl PhraseUI {
         }
 
         if btn.clicked()
-            && let Some(semitone) = note.semitone() {
-                *last_note_semitone = semitone;
-                note.set_semitone(None);
-            }
+            && let Some(semitone) = note.semitone()
+        {
+            *last_note_semitone = semitone;
+            note.set_semitone(None);
+        }
 
         let Some(semitone) = note.semitone() else {
             return;

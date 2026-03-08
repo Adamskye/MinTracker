@@ -2,8 +2,8 @@ use eframe::egui::{Button, DragValue, Ui};
 
 use crate::{
     project::{
-        EffectPreset, EnvelopeEffect, KillEffect, NoteEffects, PanEffect, PitchBendEffect, Project,
-        ProjectEvent, SlideEffect, SoftKillEffect, VibratoEffect,
+        EffectPreset, EffectPresetCmd, EnvelopeEffect, KillEffect, NoteEffects, PanEffect,
+        PitchBendEffect, Project, SlideEffect, SoftKillEffect, VibratoEffect,
     },
     widget,
 };
@@ -54,7 +54,7 @@ impl EffectsMenu {
                     let name = self.preset_textbox_content.clone();
                     let effects = effects.clone();
                     let id = Project::get_unique_key(project.effect_presets());
-                    project.push_event(ProjectEvent::UpdateEffectPreset {
+                    project.push_cmd(EffectPresetCmd::Update {
                         id,
                         new_preset: Some(Box::new(EffectPreset { name, effects })),
                     });
@@ -110,7 +110,7 @@ impl EffectsMenu {
         });
 
         if let Some(key) = to_delete_key {
-            project.push_event(ProjectEvent::UpdateEffectPreset {
+            project.push_cmd(EffectPresetCmd::Update {
                 id: *key,
                 new_preset: None,
             });
