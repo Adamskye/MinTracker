@@ -13,7 +13,7 @@ use crate::{
     AppUIState,
     effects_menu::EffectsMenu,
     page::Page,
-    project::{MID_A_SEMITONE, Note, Phrase, PhraseCmd, Project, ProjectLocation, ROWS_PER_PHRASE},
+    project::{MID_A_SEMITONE, Note, Phrase, Project, ProjectLocation, ROWS_PER_PHRASE},
     selection::{self, SelectionCoords},
     synth::{PlayerCmd, PlayerScope, ROProject},
 };
@@ -110,7 +110,7 @@ impl Page for PhraseUI {
         ui.selectable_value(&mut self.tool, Tool::Select(selection), "Select");
     }
 
-    fn handle_undo(&mut self, project: &Project) {}
+    fn handle_undo(&mut self, _project: &Project) {}
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let (Some(track_idx), Some(chain_offset), Some(phrase_offset)) = (

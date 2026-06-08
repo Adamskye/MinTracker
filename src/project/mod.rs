@@ -56,11 +56,9 @@ impl Cmd for ChainCmd {
     fn apply(&self, project: &mut Project) -> Option<Box<dyn Cmd>> {
         match self {
             Self::Update { id, new_chain } => {
-                let undo = if let Some(new_chain) = project.chains.get(id).cloned() {
-                    Some(Box::new(ChainCmd::Update { id: *id, new_chain }) as Box<dyn Cmd>)
-                } else {
-                    None
-                };
+                let undo = project.chains.get(id).cloned().map(|new_chain| {
+                    Box::new(ChainCmd::Update { id: *id, new_chain }) as Box<dyn Cmd>
+                });
 
                 project.chains.insert(*id, new_chain.clone());
                 undo
@@ -103,7 +101,7 @@ impl Cmd for ChainCmd {
 pub enum PhraseCmd {
     Update {
         id: u32,
-        new_phrase: Phrase,
+        new_phrase: Box<Phrase>,
     },
     UpdateNote {
         id: u32,
@@ -117,16 +115,14 @@ impl Cmd for PhraseCmd {
     fn apply(&self, project: &mut Project) -> Option<Box<dyn Cmd>> {
         match self {
             Self::Update { id, new_phrase } => {
-                let undo = if let Some(old_phrase) = project.phrases.get(id).cloned() {
-                    Some(Box::new(PhraseCmd::Update {
+                let undo = project.phrases.get(id).cloned().map(|old_phrase| {
+                    Box::new(PhraseCmd::Update {
                         id: *id,
-                        new_phrase: old_phrase,
-                    }) as Box<dyn Cmd>)
-                } else {
-                    None
-                };
+                        new_phrase: old_phrase.into(),
+                    }) as Box<dyn Cmd>
+                });
 
-                project.phrases.insert(*id, new_phrase.clone());
+                project.phrases.insert(*id, *new_phrase.clone());
                 undo
             }
             Self::UpdateNote {
@@ -243,14 +239,12 @@ impl Cmd for TracksCmd {
                 undo
             }
             Self::UpdateTrack { index, new_track } => {
-                let undo = if let Some(track) = project.tracks.get(*index) {
-                    Some(Box::new(TracksCmd::UpdateTrack {
+                let undo = project.tracks.get(*index).map(|track| {
+                    Box::new(TracksCmd::UpdateTrack {
                         index: *index,
                         new_track: Some(Box::new(track.clone())),
-                    }) as Box<dyn Cmd>)
-                } else {
-                    None
-                };
+                    }) as Box<dyn Cmd>
+                });
 
                 match project.tracks.get_mut(*index) {
                     Some(track) => {

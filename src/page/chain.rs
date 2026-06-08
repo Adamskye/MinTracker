@@ -16,7 +16,6 @@ use crate::{
         Chain, ChainCmd, ChainRow, PhraseCmd, Project, ProjectLocation, ROWS_PER_CHAIN,
         ROWS_PER_PHRASE,
     },
-    selection::SelectionCoords,
     synth::{PlayerCmd, PlayerScope, ROProject},
     widget::cells::{self, CellData, CellGrid},
 };
@@ -177,7 +176,7 @@ impl ChainCell {
                     if let Some(new_phrase) = new_phrase {
                         project.push_cmd(PhraseCmd::Update {
                             id: new_id,
-                            new_phrase: *new_phrase,
+                            new_phrase,
                         });
                         row.phrase = Some(new_id);
                     }
@@ -329,7 +328,7 @@ impl Page for ChainUI {
         self.up_down_side_buttons(ui, state, project);
     }
 
-    fn handle_undo(&mut self, project: &Project) {}
+    fn handle_undo(&mut self, _project: &Project) {}
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let (Some(track_idx), Some(chain_offset)) = (state.viewed_track, state.track_selected_row)
@@ -485,7 +484,7 @@ impl ChainUI {
     fn show_phrase_list(&mut self, ui: &mut Ui, ui_state: &mut AppUIState, project: &Project) {
         let (tx, rx) = mpsc::channel();
         ui_state.player.send_command(PlayerCmd::RequestLocation(tx));
-        let position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
+        let _position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
 
         // add phrases to cell grid
 
@@ -618,12 +617,12 @@ impl ChainUI {
         let Some(new_phrase) = phrase_id_opt
             .and_then(|phrase_id| project.phrases().get(&phrase_id))
             .cloned()
+            .map(Box::new)
         else {
             return;
         };
 
         let id = Project::get_unique_key(project.phrases());
-        //project.push_event(ProjectEvent::UpdatePhrase { id, new_phrase });
         project.push_cmd(PhraseCmd::Update { id, new_phrase });
 
         *phrase_id_opt = Some(id);

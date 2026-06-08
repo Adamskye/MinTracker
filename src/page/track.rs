@@ -1,4 +1,4 @@
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 
 use eframe::{
     egui::{Button, ComboBox, Context, DragValue, Grid, ScrollArea, Ui, Window},
@@ -674,7 +674,8 @@ fn deep_clone(chain_id: u32, project: &Project) -> u32 {
                 .phrases()
                 .get(&unique_id)
                 .cloned()
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .into();
 
             project.push_cmd(PhraseCmd::Update {
                 id: new_id,
