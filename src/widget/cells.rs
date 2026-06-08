@@ -139,12 +139,12 @@ pub trait CellData<G> {
     }
 
     #[allow(unused)]
-    fn color(&self) -> Color32;
-
-    /// Whether this cell has a context menu when right-clicked. False by default.
-    fn has_context_menu(&self) -> bool {
-        false
+    fn color(&self) -> Color32 {
+        Color32::TRANSPARENT
     }
+
+    /// Whether this cell has a context menu when right-clicked.
+    fn has_context_menu(&self) -> bool;
 
     /// Context menu when right-clicked. Only shows if has_context_menu() returns true.
     fn context_menu(

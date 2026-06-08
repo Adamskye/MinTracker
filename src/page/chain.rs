@@ -45,8 +45,8 @@ impl CellData<CellSharedState> for ChainCell {
         }
     }
 
-    fn color(&self) -> Color32 {
-        Color32::TRANSPARENT
+    fn has_context_menu(&self) -> bool {
+        matches!(self, ChainCell::Phrase { .. })
     }
 
     fn context_menu(
@@ -254,10 +254,19 @@ impl ChainCell {
             None => return,
         };
 
+        let Some(current_transpose) = project
+            .chains()
+            .get(&viewed_chain)
+            .and_then(|chain| chain.rows.get(row))
+            .map(|row| row.transpose)
+        else {
+            return;
+        };
+
         project.push_cmd(ChainCmd::UpdateTranspose {
             id: viewed_chain,
             row_index: row,
-            new_transpose: change,
+            new_transpose: current_transpose + change,
         });
 
         // project.push_event(ProjectEvent::UpdateChainNew {
