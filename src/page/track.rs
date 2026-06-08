@@ -72,6 +72,10 @@ impl CellData<TrackUIGridState> for TrackCellData {
         self.is_playing(grid_state)
     }
 
+    fn has_context_menu(&self) -> bool {
+        matches!(self, TrackCellData::ChainButton { .. })
+    }
+
     fn context_menu(
         &self,
         ui: &mut Ui,

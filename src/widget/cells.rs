@@ -140,6 +140,13 @@ pub trait CellData<G> {
 
     #[allow(unused)]
     fn color(&self) -> Color32;
+
+    /// Whether this cell has a context menu when right-clicked. False by default.
+    fn has_context_menu(&self) -> bool {
+        false
+    }
+
+    /// Context menu when right-clicked. Only shows if has_context_menu() returns true.
     fn context_menu(
         &self,
         _ui: &mut Ui,
@@ -382,10 +389,12 @@ pub fn cells<T, G>(
 
             // context menu
             let mut context_menu_opened = false;
-            response.context_menu(|ui| {
-                context_menu_opened = true;
-                cell_data.context_menu(ui, grid_state, state, project);
-            });
+            if cell_data.has_context_menu() {
+                response.context_menu(|ui| {
+                    context_menu_opened = true;
+                    cell_data.context_menu(ui, grid_state, state, project);
+                });
+            }
 
             if response.clicked() {
                 cell_data.on_click(grid_state, state, project);
