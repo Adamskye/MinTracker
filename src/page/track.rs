@@ -316,7 +316,7 @@ impl Page for TrackUI {
     fn play(&self, state: &AppUIState, project: ROProject) {
         let chain_offset = self
             .cells_state
-            .get_selection()
+            .selection()
             .and_then(|s| {
                 let grid_row = s.first.0.min(s.last.0);
                 self.cells_state.get(grid_row, s.first.1).and_then(|cell| {
@@ -553,7 +553,7 @@ impl TrackUI {
 
     fn copy_selection(&mut self, project: &Project) {
         // get selection from cells_state
-        let Some(selection) = self.cells_state.get_selection() else {
+        let Some(selection) = self.cells_state.selection() else {
             return;
         };
 
@@ -590,9 +590,9 @@ impl TrackUI {
     fn paste_clipboard(&mut self, project: &Project) {
         let Some(row) = self
             .cells_state
-            .get_selection()
-            .map(|s| s.first.0.min(s.last.0))
-            .unwrap_or_else(|| self.cells_state.get_highlighted_position().0)
+            .selection()
+            .map(|s| s.small_row())
+            .unwrap_or_else(|| self.cells_state.highlighted_position().0)
             .checked_sub(1)
         else {
             return;
@@ -600,9 +600,9 @@ impl TrackUI {
 
         let Some(column) = self
             .cells_state
-            .get_selection()
-            .map(|s| s.first.1.min(s.last.1))
-            .or_else(|| Some(self.cells_state.get_highlighted_position().1))
+            .selection()
+            .map(|s| s.small_col())
+            .or_else(|| Some(self.cells_state.highlighted_position().1))
         else {
             return;
         };

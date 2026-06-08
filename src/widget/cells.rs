@@ -60,11 +60,11 @@ where
         }
     }
 
-    pub fn get_selection(&self) -> Option<GridSelection> {
+    pub fn selection(&self) -> Option<GridSelection> {
         self.selection.clone()
     }
 
-    pub fn get_highlighted_position(&self) -> (usize, usize) {
+    pub fn highlighted_position(&self) -> (usize, usize) {
         (self.highlighted_row, self.highlighted_col)
     }
 
@@ -193,6 +193,8 @@ fn rect_from_cell_pos(row: usize, column: usize, cell_size: egui::Vec2, grid_rec
     )
 }
 
+/// T is the type of data stored in each cell, and G is the type of data that is shared across all
+/// cells.
 pub fn cells<T, G>(
     ui: &mut Ui,
     env: &mut CellGrid<T, G>,

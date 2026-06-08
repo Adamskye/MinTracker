@@ -7,6 +7,7 @@ use eframe::{
     },
     epaint::Color32,
 };
+use egui::Event;
 use egui_phosphor::regular;
 
 use crate::{
@@ -20,9 +21,16 @@ use crate::{
     widget::cells::{self, CellData, CellGrid},
 };
 
-type Clipboard = Vec<ChainRow>;
+#[derive(Default, Clone)]
+enum Clipboard {
+    #[default]
+    Empty,
+    FullRows(Vec<ChainRow>),
+    OnlyPhrases(Vec<Option<u32>>),
+    OnlyTransposes(Vec<f32>),
+}
 
-struct CellSharedState {}
+struct CellSharedState;
 
 #[derive(Clone)]
 enum ChainCell {
@@ -109,7 +117,6 @@ impl CellData<CellSharedState> for ChainCell {
                 Self::keyboard_input_phrase(*row, *id, input, _grid_state, state, project)
             }
             ChainCell::Transpose { row, .. } => {
-                println!("{row}");
                 Self::keyboard_input_transpose(*row, input, _grid_state, state, project)
             }
             _ => {}
@@ -312,6 +319,8 @@ impl Page for ChainUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         let chain_opt = state.viewed_chain.and_then(|id| project.chains().get(&id));
 
+        self.handle_keybinds(ui, state, project);
+
         //Self::handle_player_buffer(&self.local_state, state, project);
         ScrollArea::vertical().show(ui, |ui| {
             if chain_opt.is_some() {
@@ -376,6 +385,16 @@ impl Page for ChainUI {
 }
 
 impl ChainUI {
+    fn handle_keybinds(&mut self, ui: &mut Ui, state: &AppUIState, project: &Project) {
+        ui.input(|i| {
+            if i.events.iter().any(|e| matches!(e, Event::Copy)) {
+                self.copy_selection(project, state);
+            } else if i.modifiers.command && i.events.iter().any(|e| matches!(e, Event::Paste(_))) {
+                self.paste_clipboard(project, state);
+            }
+        });
+    }
+
     fn get_last_row_to_play(
         track_idx: usize,
         chain_offset: usize,
@@ -606,20 +625,92 @@ impl ChainUI {
         }
     }
 
-    fn copy_selection(chain: &mut Chain, clipboard: &mut Clipboard, row1: usize, row2: usize) {
-        *clipboard = chain
+    fn copy_selection(&mut self, project: &Project, state: &AppUIState) {
+        let Some(this_chain) = state.viewed_chain.and_then(|vc| project.chains().get(&vc)) else {
+            return;
+        };
+
+        let Some(selection) = self.cell_grid.selection() else {
+            return;
+        };
+
+        let small_col = selection.small_col();
+        let big_col = selection.big_col();
+
+        let small_row = selection.small_row();
+        let big_row = selection.big_row();
+
+        let selected_rows = this_chain
             .rows
             .iter()
-            .take(row1.max(row2) + 1)
-            .skip(row1.min(row2))
+            .skip(small_row)
+            .take(big_row - small_row + 1)
             .cloned()
-            .collect::<Clipboard>();
+            .collect::<Vec<ChainRow>>();
+
+        if small_col == 0 && big_col == 1 {
+            // selecting full rows
+            self.clipboard = Clipboard::FullRows(selected_rows);
+        } else if small_col == 0 {
+            // selecting only phrases
+            self.clipboard =
+                Clipboard::OnlyPhrases(selected_rows.into_iter().map(|row| row.phrase).collect());
+        } else {
+            // selecting only transposes
+            self.clipboard = Clipboard::OnlyTransposes(
+                selected_rows.into_iter().map(|row| row.transpose).collect(),
+            );
+        }
     }
 
-    fn paste_selection(chain: &mut Chain, clipboard: &Clipboard, row: usize) {
-        for (proj_row, clipboard_row) in chain.rows.iter_mut().skip(row).zip(clipboard) {
-            *proj_row = clipboard_row.clone();
+    fn paste_clipboard(&mut self, project: &Project, state: &AppUIState) {
+        let Some(mut chain) = state
+            .viewed_chain
+            .and_then(|vc| project.chains().get(&vc))
+            .cloned()
+        else {
+            return;
+        };
+
+        let start_row = self
+            .cell_grid
+            .selection()
+            .map(|s| s.small_row())
+            .unwrap_or_else(|| self.cell_grid.highlighted_position().0);
+
+        // paste from clipboard, starting at row
+        match &self.clipboard {
+            Clipboard::Empty => return,
+            Clipboard::FullRows(chain_rows) => {
+                for (this_row, clipboard_row) in chain
+                    .rows
+                    .iter_mut()
+                    .skip(start_row)
+                    .zip(chain_rows.into_iter())
+                {
+                    *this_row = clipboard_row.clone();
+                }
+            }
+            Clipboard::OnlyPhrases(items) => {
+                for (row, phrase_id_opt) in
+                    chain.rows.iter_mut().skip(start_row).zip(items.into_iter())
+                {
+                    row.phrase = *phrase_id_opt;
+                }
+            }
+            Clipboard::OnlyTransposes(items) => {
+                for (row, transpose) in chain.rows.iter_mut().skip(start_row).zip(items.into_iter())
+                {
+                    row.transpose = *transpose;
+                }
+            }
         }
+
+        // commit row
+        project.push_cmd(ChainCmd::Update {
+            id: state.viewed_chain.unwrap(),
+            new_chain: chain,
+        });
     }
 
     fn clone_phrase(phrase_id_opt: &mut Option<u32>, project: &Project) {
