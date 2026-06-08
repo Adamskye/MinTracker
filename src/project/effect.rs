@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ADSREnvelope;
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NoteEffects {
     #[serde(default)]
     pub vibrato: Option<VibratoEffect>,
@@ -47,7 +47,7 @@ pub struct EffectPreset {
     pub effects: NoteEffects,
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VibratoEffect {
     /// in semitones
     pub amplitude: f32,
@@ -64,17 +64,17 @@ impl Default for VibratoEffect {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KillEffect {
     pub delay_ticks: f32,
 }
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PitchBendEffect {
     pub semitones_per_tick: f32,
 }
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SlideEffect {
     /// attached when effect is added
     pub start_semitone: Option<u8>,
@@ -83,17 +83,17 @@ pub struct SlideEffect {
     pub time_ticks: f32,
 }
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvelopeEffect {
     pub envelope: ADSREnvelope,
 }
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanEffect {
     pub value: f32,
 }
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SoftKillEffect {
     pub delay_ticks: f32,
 }

@@ -6,7 +6,7 @@ use serde_big_array::BigArray;
 
 const DEFAULT_WAVETABLE_SIZE: usize = 64;
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ADSREnvelope {
     #[serde(default)]
     pub volume: f32,

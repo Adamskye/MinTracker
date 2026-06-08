@@ -6,7 +6,7 @@ pub const NUM_SEMITONES: u8 = 108;
 pub const MID_A_SEMITONE: u8 = 57;
 pub const MID_A_FREQUENCY: f32 = 440.0;
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Note {
     semitone: Option<u8>,
 

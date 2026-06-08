@@ -117,13 +117,16 @@ impl Cmd for PhraseCmd {
     fn apply(&self, project: &mut Project) -> Option<Box<dyn Cmd>> {
         match self {
             Self::Update { id, new_phrase } => {
-                let phrase = project.phrases.get_mut(id)?;
-                let undo = Some(Box::new(PhraseCmd::Update {
-                    id: *id,
-                    new_phrase: phrase.clone(),
-                }) as Box<dyn Cmd>);
+                let undo = if let Some(old_phrase) = project.phrases.get(id).cloned() {
+                    Some(Box::new(PhraseCmd::Update {
+                        id: *id,
+                        new_phrase: old_phrase,
+                    }) as Box<dyn Cmd>)
+                } else {
+                    None
+                };
 
-                *phrase = new_phrase.clone();
+                project.phrases.insert(*id, new_phrase.clone());
                 undo
             }
             Self::UpdateNote {

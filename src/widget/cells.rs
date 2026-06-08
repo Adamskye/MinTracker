@@ -10,6 +10,24 @@ pub struct GridSelection {
     pub last: (usize, usize),
 }
 
+impl GridSelection {
+    pub fn small_row(&self) -> usize {
+        self.first.0.min(self.last.0)
+    }
+
+    pub fn big_row(&self) -> usize {
+        self.first.0.max(self.last.0)
+    }
+
+    pub fn small_col(&self) -> usize {
+        self.first.1.min(self.last.1)
+    }
+
+    pub fn big_col(&self) -> usize {
+        self.first.1.max(self.last.1)
+    }
+}
+
 pub struct CellGrid<T, G>
 where
     T: Default + Clone + CellData<G>,
@@ -408,5 +426,62 @@ pub fn cells<T, G>(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn returns_correct_bounds_when_first_is_top_left() {
+        let selection = GridSelection {
+            first: (2, 3),
+            last: (5, 7),
+        };
+
+        assert_eq!(selection.small_row(), 2);
+        assert_eq!(selection.big_row(), 5);
+        assert_eq!(selection.small_col(), 3);
+        assert_eq!(selection.big_col(), 7);
+    }
+
+    #[test]
+    fn returns_correct_bounds_when_first_is_bottom_right() {
+        let selection = GridSelection {
+            first: (5, 7),
+            last: (2, 3),
+        };
+
+        assert_eq!(selection.small_row(), 2);
+        assert_eq!(selection.big_row(), 5);
+        assert_eq!(selection.small_col(), 3);
+        assert_eq!(selection.big_col(), 7);
+    }
+
+    #[test]
+    fn returns_same_values_for_single_cell_selection() {
+        let selection = GridSelection {
+            first: (4, 6),
+            last: (4, 6),
+        };
+
+        assert_eq!(selection.small_row(), 4);
+        assert_eq!(selection.big_row(), 4);
+        assert_eq!(selection.small_col(), 6);
+        assert_eq!(selection.big_col(), 6);
+    }
+
+    #[test]
+    fn handles_mixed_row_and_column_order() {
+        let selection = GridSelection {
+            first: (8, 2),
+            last: (3, 10),
+        };
+
+        assert_eq!(selection.small_row(), 3);
+        assert_eq!(selection.big_row(), 8);
+        assert_eq!(selection.small_col(), 2);
+        assert_eq!(selection.big_col(), 10);
     }
 }

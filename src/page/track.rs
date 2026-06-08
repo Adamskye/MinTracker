@@ -291,7 +291,6 @@ impl Default for TrackUI {
             grid_state: TrackUIGridState::default(),
             cells_state: CellGrid::new(CHAINS_PER_TRACK, 0),
             grid_update_ts: None,
-            //undo: UndoStack::new(100),
         }
     }
 }
@@ -299,7 +298,6 @@ impl Default for TrackUI {
 impl Page for TrackUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         ScrollArea::both().show(ui, |ui| {
-            //self.undo.push(&project.tracks());
             self.handle_keybinds(ui, project);
             ui.horizontal(|ui| {
                 self.show_tracks(ui, state, project);
@@ -555,16 +553,16 @@ impl TrackUI {
             return;
         };
 
-        let Some(small_row) = selection.first.0.checked_sub(1) else {
+        // subtracting 1 to ignore the options button row
+        let Some(small_row) = selection.small_row().checked_sub(1) else {
             return;
         };
-        let Some(big_row) = selection.first.0.checked_sub(1) else {
+        let Some(big_row) = selection.big_row().checked_sub(1) else {
             return;
         };
 
-        // subtracting 1 to ignore the options button row
-        let small_col = selection.first.1.min(selection.last.1);
-        let big_col = selection.first.1.max(selection.last.1);
+        let small_col = selection.small_col();
+        let big_col = selection.big_col();
 
         self.clipboard = project
             .tracks()
@@ -581,6 +579,8 @@ impl TrackUI {
                     .collect::<Vec<Option<u32>>>()
             })
             .collect::<Vec<Vec<Option<u32>>>>();
+
+        dbg!(&self.clipboard);
     }
 
     fn paste_clipboard(&mut self, project: &Project) {

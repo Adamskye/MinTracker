@@ -1,14 +1,11 @@
-use std::{
-    rc::Rc,
-    sync::{Arc, mpsc},
-};
+use std::sync::mpsc;
 
 use eframe::{
     egui::{
-        Button, DragValue, Frame, Grid, Key, Response, RichText, ScrollArea, Sense, Separator, Ui,
+        RichText, ScrollArea, Ui,
         util::undoer::{Settings, Undoer},
     },
-    epaint::{Color32, Stroke},
+    epaint::Color32,
 };
 use egui_phosphor::regular;
 
@@ -19,19 +16,12 @@ use crate::{
         Chain, ChainCmd, ChainRow, PhraseCmd, Project, ProjectLocation, ROWS_PER_CHAIN,
         ROWS_PER_PHRASE,
     },
-    selection::{self, SelectionCoords},
+    selection::SelectionCoords,
     synth::{PlayerCmd, PlayerScope, ROProject},
     widget::cells::{self, CellData, CellGrid},
 };
 
 type Clipboard = Vec<ChainRow>;
-
-#[derive(Default, PartialEq)]
-enum Tool {
-    #[default]
-    Edit,
-    Select(SelectionCoords),
-}
 
 struct CellSharedState {}
 
