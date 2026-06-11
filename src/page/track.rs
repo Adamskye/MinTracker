@@ -16,7 +16,7 @@ use crate::{
         Track, TracksCmd,
     },
     synth::{PlayerCmd, PlayerScope, ROProject},
-    widget::cells::{self, CellData, CellGrid, CellGridEvent},
+    widget::cells::{CellGridWidget, cell_data::CellData, event::CellGridEvent},
 };
 
 type Clipboard = Vec<Vec<Option<u32>>>;
@@ -35,8 +35,8 @@ pub enum TrackCellData {
     },
 }
 
-impl CellData<GridState> for TrackCellData {
-    fn color(&self, _: &GridState) -> Color32 {
+impl CellData<GridSharedData> for TrackCellData {
+    fn color(&self, _: &GridSharedData) -> Color32 {
         Color32::TRANSPARENT
     }
 
@@ -52,13 +52,13 @@ impl CellData<GridState> for TrackCellData {
         }
     }
 
-    fn inner_widget(&self, ui: &mut Ui, _: &mut GridState, _: &mut AppUIState, _: &Project) {
+    fn inner_widget(&self, ui: &mut Ui, _: &mut GridSharedData, _: &mut AppUIState, _: &Project) {
         ui.horizontal_centered(|ui| {
             ui.label(regular::CARET_RIGHT);
         });
     }
 
-    fn has_inner_widget(&self, grid_state: &mut GridState) -> bool {
+    fn has_inner_widget(&self, grid_state: &mut GridSharedData) -> bool {
         let this = &self;
         match this {
             TrackCellData::ChainButton {
@@ -82,7 +82,7 @@ impl CellData<GridState> for TrackCellData {
     fn context_menu(
         &self,
         ui: &mut Ui,
-        _grid_state: &mut GridState,
+        _grid_state: &mut GridSharedData,
         _state: &mut AppUIState,
         project: &Project,
     ) {
@@ -99,7 +99,7 @@ impl CellData<GridState> for TrackCellData {
 
     fn trigger_action(
         &self,
-        grid_state: &mut GridState,
+        grid_state: &mut GridSharedData,
         ui_state: &mut AppUIState,
         project: &Project,
     ) {
@@ -132,7 +132,12 @@ impl CellData<GridState> for TrackCellData {
         }
     }
 
-    fn on_click(&self, grid_state: &mut GridState, _state: &mut AppUIState, _project: &Project) {
+    fn on_click(
+        &self,
+        grid_state: &mut GridSharedData,
+        _state: &mut AppUIState,
+        _project: &Project,
+    ) {
         // open track settings
         if let TrackCellData::TrackOptionsButton { track_index } = self {
             grid_state.track_opened_settings =
@@ -151,7 +156,7 @@ impl CellData<GridState> for TrackCellData {
     fn on_keyboard_input(
         &self,
         input: &egui::InputState,
-        _grid_state: &mut GridState,
+        _grid_state: &mut GridSharedData,
         _ui_state: &mut AppUIState,
         project: &Project,
     ) -> Option<CellGridEvent> {
@@ -260,16 +265,15 @@ impl TrackCellData {
 }
 
 #[derive(Default)]
-struct GridState {
+struct GridSharedData {
     track_opened_settings: Option<usize>,
     playing: Vec<Option<ProjectLocation>>,
 }
 
 pub struct TrackUI {
     clipboard: Clipboard,
-    grid_state: GridState,
 
-    cells_state: CellGrid<TrackCellData, GridState>,
+    cell_grid: CellGridWidget<TrackCellData, GridSharedData>,
     grid_update_ts: Option<ProjectTimestamp>,
 }
 
@@ -277,8 +281,7 @@ impl Default for TrackUI {
     fn default() -> Self {
         Self {
             clipboard: Default::default(),
-            grid_state: GridState::default(),
-            cells_state: CellGrid::new(CHAINS_PER_TRACK, 0),
+            cell_grid: CellGridWidget::new(CHAINS_PER_TRACK, 0, GridSharedData::default()),
             grid_update_ts: None,
         }
     }
@@ -298,17 +301,22 @@ impl Page for TrackUI {
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let chain_offset = self
-            .cells_state
-            .selection()
+            .cell_grid
+            .state
+            .selection
+            .as_ref()
             .and_then(|s| {
                 let grid_row = s.first.0.min(s.last.0);
-                self.cells_state.get(grid_row, s.first.1).and_then(|cell| {
-                    if let TrackCellData::ChainButton { chain_offset, .. } = cell {
-                        Some(*chain_offset)
-                    } else {
-                        None
-                    }
-                })
+                self.cell_grid
+                    .state
+                    .get(grid_row, s.first.1)
+                    .and_then(|cell| {
+                        if let TrackCellData::ChainButton { chain_offset, .. } = cell {
+                            Some(*chain_offset)
+                        } else {
+                            None
+                        }
+                    })
             })
             .unwrap_or(0);
 
@@ -352,20 +360,20 @@ impl TrackUI {
         // update playing position
         let position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
         if let Some(position_opt) = &position_opt {
-            self.grid_state.playing = position_opt.clone();
+            self.cell_grid.shared_data.playing = position_opt.clone();
         } else {
-            self.grid_state.playing = vec![None; project.tracks().len()];
+            self.cell_grid.shared_data.playing = vec![None; project.tracks().len()];
         }
 
         // update cells state
 
         // +1 for the option button row
-        self.cells_state.set_num_columns(project.tracks().len());
-        self.cells_state.set_num_rows(CHAINS_PER_TRACK + 1);
+        self.cell_grid.state.set_num_columns(project.tracks().len());
+        self.cell_grid.state.set_num_rows(CHAINS_PER_TRACK + 1);
 
         // add track options buttons
         for track_index in 0..project.tracks().len() {
-            self.cells_state.set(
+            self.cell_grid.state.set(
                 0,
                 track_index,
                 TrackCellData::TrackOptionsButton { track_index },
@@ -378,7 +386,7 @@ impl TrackUI {
 
             for (track_index, track) in project.tracks().iter().enumerate() {
                 for (chain_offset, &chain_id) in track.chains.iter().enumerate() {
-                    self.cells_state.set(
+                    self.cell_grid.state.set(
                         chain_offset + 1,
                         track_index,
                         TrackCellData::ChainButton {
@@ -391,14 +399,7 @@ impl TrackUI {
             }
         }
 
-        // show cells
-        cells::cells(
-            ui,
-            &mut self.cells_state,
-            &mut self.grid_state,
-            state,
-            project,
-        );
+        self.cell_grid.show(ui, state, project);
 
         self.show_track_settings(ui.ctx(), project);
 
@@ -413,7 +414,7 @@ impl TrackUI {
     }
 
     fn show_track_settings(&mut self, context: &Context, project: &Project) {
-        let Some(track_num) = self.grid_state.track_opened_settings else {
+        let Some(track_num) = self.cell_grid.shared_data.track_opened_settings else {
             return;
         };
 
@@ -530,13 +531,13 @@ impl TrackUI {
         }
 
         if !open {
-            self.grid_state.track_opened_settings = None;
+            self.cell_grid.shared_data.track_opened_settings = None;
         }
     }
 
     fn copy_selection(&mut self, project: &Project) {
         // get selection from cells_state
-        let Some(selection) = self.cells_state.selection() else {
+        let Some(selection) = &self.cell_grid.state.selection else {
             return;
         };
 
@@ -572,20 +573,24 @@ impl TrackUI {
 
     fn paste_clipboard(&mut self, project: &Project) {
         let Some(row) = self
-            .cells_state
-            .selection()
+            .cell_grid
+            .state
+            .selection
+            .as_ref()
             .map(|s| s.small_row())
-            .unwrap_or_else(|| self.cells_state.highlighted_position().0)
+            .unwrap_or_else(|| self.cell_grid.state.highlighted_position().0)
             .checked_sub(1)
         else {
             return;
         };
 
         let Some(column) = self
-            .cells_state
-            .selection()
+            .cell_grid
+            .state
+            .selection
+            .as_ref()
             .map(|s| s.small_col())
-            .or_else(|| Some(self.cells_state.highlighted_position().1))
+            .or_else(|| Some(self.cell_grid.state.highlighted_position().1))
         else {
             return;
         };

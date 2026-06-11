@@ -14,7 +14,7 @@ use crate::{
         ChainCmd, ChainRow, PhraseCmd, Project, ProjectLocation, ROWS_PER_CHAIN, ROWS_PER_PHRASE,
     },
     synth::{PlayerCmd, PlayerScope, ROProject},
-    widget::cells::{self, CellData, CellGrid, CellGridEvent},
+    widget::cells::{CellGridWidget, cell_data::CellData, event::CellGridEvent},
 };
 
 #[derive(Default, Clone)]
@@ -304,16 +304,14 @@ impl CellState {
 
 pub struct ChainUI {
     clipboard: Clipboard,
-    cell_grid: CellGrid<CellState, GridState>,
-    grid_state: GridState,
+    cell_grid: CellGridWidget<CellState, GridState>,
 }
 
 impl Default for ChainUI {
     fn default() -> Self {
         Self {
             clipboard: Default::default(),
-            cell_grid: CellGrid::new(ROWS_PER_CHAIN, 2),
-            grid_state: GridState::default(),
+            cell_grid: CellGridWidget::new(ROWS_PER_CHAIN, 2, GridState::default()),
         }
     }
 }
@@ -363,7 +361,7 @@ impl Page for ChainUI {
             first_notes: vec![ProjectLocation {
                 track_idx,
                 chain_offset,
-                phrase_offset: self.cell_grid.highlighted_row(),
+                phrase_offset: self.cell_grid.state.highlighted_row(),
                 note_offset: 0,
             }]
             .into(),
@@ -390,7 +388,7 @@ impl Page for ChainUI {
                 .map(|track_idx| ProjectLocation {
                     track_idx,
                     chain_offset,
-                    phrase_offset: self.cell_grid.highlighted_row(),
+                    phrase_offset: self.cell_grid.state.highlighted_row(),
                     note_offset: 0,
                 })
                 .collect(),
@@ -448,18 +446,14 @@ impl ChainUI {
         state.player.send_command(PlayerCmd::RequestLocation(tx));
         let positions = rx.recv().ok()?;
 
-        if let Some(pos) = positions.iter().flatten().find(|pos| {
+        positions.iter().flatten().find(|pos| {
             Some(pos.track_idx) == state.viewed_track
                 && Some(pos.chain_offset) == state.track_selected_row
-        }) {
-            Some(pos.phrase_offset)
-        } else {
-            None
-        }
+        }).map(|pos| pos.phrase_offset)
     }
 
     fn show_phrase_list(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        self.grid_state.playing_row = self.playing_row(state);
+        self.cell_grid.shared_data.playing_row = self.playing_row(state);
 
         let Some(chain) = state
             .viewed_chain
@@ -469,7 +463,7 @@ impl ChainUI {
         };
 
         for (row_idx, row) in chain.rows.iter().enumerate() {
-            self.cell_grid.set(
+            self.cell_grid.state.set(
                 row_idx,
                 0,
                 CellState::Phrase {
@@ -477,7 +471,7 @@ impl ChainUI {
                     id: row.phrase,
                 },
             );
-            self.cell_grid.set(
+            self.cell_grid.state.set(
                 row_idx,
                 1,
                 CellState::Transpose {
@@ -487,13 +481,7 @@ impl ChainUI {
             );
         }
 
-        cells::cells(
-            ui,
-            &mut self.cell_grid,
-            &mut self.grid_state,
-            state,
-            project,
-        );
+        self.cell_grid.show(ui, state, project);
     }
 
     fn up_down_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
@@ -538,7 +526,7 @@ impl ChainUI {
             return;
         };
 
-        let Some(selection) = self.cell_grid.selection() else {
+        let Some(selection) = &self.cell_grid.state.selection else {
             return;
         };
 
@@ -582,9 +570,11 @@ impl ChainUI {
 
         let start_row = self
             .cell_grid
-            .selection()
+            .state
+            .selection
+            .as_ref()
             .map(|s| s.small_row())
-            .unwrap_or_else(|| self.cell_grid.highlighted_position().0);
+            .unwrap_or_else(|| self.cell_grid.state.highlighted_position().0);
 
         // paste from clipboard, starting at row
         match &self.clipboard {

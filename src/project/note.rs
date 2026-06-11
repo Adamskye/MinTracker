@@ -103,41 +103,8 @@ pub struct Note {
     pub effects: NoteEffects,
 }
 
-impl Note {
-    #[deprecated]
-    pub fn has_effects(&self) -> bool {
-        self.effects != NoteEffects::default()
-    }
-
-    #[deprecated]
-    pub fn letter_from_semitone(semitone: u8) -> &'static str {
-        match semitone % 12 {
-            0 | 1 => "C",
-            2 | 3 => "D",
-            4 => "E",
-            5 | 6 => "F",
-            7 | 8 => "G",
-            9 | 10 => "A",
-            11 => "B",
-            _ => "N/A",
-        }
-    }
-
-    #[deprecated]
-    pub fn sharp_from_semitone(semitone: u8) -> bool {
-        matches!(semitone % 12, 1 | 3 | 6 | 8 | 10)
-    }
-
-    #[deprecated]
-    pub fn octave_from_semitone(semitone: u8) -> u8 {
-        semitone / 12
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::helpers;
-
     use super::*;
 
     #[test]

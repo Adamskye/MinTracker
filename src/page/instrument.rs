@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, ComboBox, Label, TextWrapMode, Ui,
+    self, ComboBox, Label, Ui,
     util::undoer::{Settings, Undoer},
 };
 
 use crate::{
     AppUIState,
     page::Page,
-    project::{Instrument, InstrumentCmd, InstrumentDataTable, NUM_SEMITONES, Note, Project},
+    project::{Instrument, InstrumentCmd, InstrumentDataTable, NUM_SEMITONES, Project, Semitone},
     widget::{adsr_graph, waveform_graph::WaveformGraph},
 };
 
@@ -250,19 +250,7 @@ impl InstrumentUI {
             ui.style_mut().spacing.item_spacing *= 2.0;
             for (semitone, mapping) in s.data_table_map.iter_mut().enumerate() {
                 ui.vertical(|ui| {
-                    ui.add(
-                        Label::new(format!(
-                            "{}{}{}",
-                            Note::letter_from_semitone(semitone as u8),
-                            if Note::sharp_from_semitone(semitone as u8) {
-                                "#"
-                            } else {
-                                ""
-                            },
-                            Note::octave_from_semitone(semitone as u8)
-                        ))
-                        .wrap_mode(TextWrapMode::Extend),
-                    );
+                    ui.add(Label::new(Semitone::from(semitone as u8).to_string()));
 
                     let btn_response = ui.small_button(
                         mapping

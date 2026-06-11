@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 
-use egui::{Align2, Color32, Key, ScrollArea, Sense, Ui, Vec2, viewport};
+use egui::{Align2, Color32, Key, ScrollArea, Sense, Ui};
 use egui_phosphor::regular::{self, FUNCTION, MINUS};
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
         VOICES_PER_TRACK,
     },
     synth::{PlayerCmd, PlayerScope, ROProject},
-    widget::cells::{CellData, CellGrid, CellGridEvent, cells},
+    widget::cells::{CellGridWidget, cell_data::CellData, event::CellGridEvent},
 };
 
 #[derive(Default)]
@@ -125,15 +125,12 @@ impl CellData<GridState> for CellState {
     }
 
     fn on_click(&self, grid_state: &mut GridState, _state: &mut AppUIState, _project: &Project) {
-        match self {
-            CellState::AddEffect { row, voice } => {
-                grid_state.fx_menu = FXMenuState::Open {
-                    voice_idx: *voice,
-                    note_idx: *row,
-                    fx_menu: EffectsMenu::default(),
-                };
-            }
-            _ => {}
+        if let CellState::AddEffect { row, voice } = self {
+            grid_state.fx_menu = FXMenuState::Open {
+                voice_idx: *voice,
+                note_idx: *row,
+                fx_menu: EffectsMenu::default(),
+            };
         }
     }
 
@@ -210,20 +207,20 @@ impl CellState {
         };
 
         if input.key_pressed(state.preferences().keybinds.down) && *row >= ROWS_PER_PHRASE - 1 {
-            return if go_to_next(state, project) {
+            if go_to_next(state, project) {
                 Some(CellGridEvent::SetHighlightedPosition(0, voice))
             } else {
                 None
-            };
+            }
         } else if input.key_pressed(state.preferences().keybinds.up) && *row == 0 {
-            return if go_to_previous(state, project) {
+            if go_to_previous(state, project) {
                 Some(CellGridEvent::SetHighlightedPosition(
                     ROWS_PER_PHRASE - 1,
                     voice,
                 ))
             } else {
                 None
-            };
+            }
         } else {
             None
         }
@@ -231,15 +228,17 @@ impl CellState {
 }
 
 pub struct PhraseUI {
-    cell_grid: CellGrid<CellState, GridState>,
-    grid_state: GridState,
+    cell_grid: CellGridWidget<CellState, GridState>,
 }
 
 impl Default for PhraseUI {
     fn default() -> Self {
         Self {
-            cell_grid: CellGrid::new(ROWS_PER_PHRASE, VOICES_PER_TRACK * 2),
-            grid_state: GridState::default(),
+            cell_grid: CellGridWidget::new(
+                ROWS_PER_PHRASE,
+                VOICES_PER_TRACK * 2,
+                GridState::default(),
+            ),
         }
     }
 }
@@ -261,7 +260,7 @@ impl Page for PhraseUI {
             ui.allocate_space(ui.available_size());
         });
 
-        if matches!(self.grid_state.fx_menu, FXMenuState::Open { .. }) {
+        if matches!(self.cell_grid.shared_data.fx_menu, FXMenuState::Open { .. }) {
             self.show_fx_menu(ui, state, project);
         }
     }
@@ -321,7 +320,7 @@ impl PhraseUI {
         for (voice_idx, voice) in phrase.voices.iter().enumerate() {
             for (note_idx, note) in voice.notes.iter().enumerate() {
                 // showing note
-                self.cell_grid.set(
+                self.cell_grid.state.set(
                     note_idx,
                     voice_idx * 2,
                     CellState::Note {
@@ -332,7 +331,7 @@ impl PhraseUI {
                 );
 
                 // button to select effects
-                self.cell_grid.set(
+                self.cell_grid.state.set(
                     note_idx,
                     (voice_idx * 2) + 1,
                     CellState::AddEffect {
@@ -344,15 +343,8 @@ impl PhraseUI {
         }
 
         // determine which row is playing
-        self.grid_state.playing_row = self.playing_row(state);
-
-        cells(
-            ui,
-            &mut self.cell_grid,
-            &mut self.grid_state,
-            state,
-            project,
-        );
+        self.cell_grid.shared_data.playing_row = self.playing_row(state);
+        self.cell_grid.show(ui, state, project);
     }
 
     fn playing_row(&self, state: &AppUIState) -> Option<usize> {
@@ -379,13 +371,13 @@ impl PhraseUI {
             voice_idx,
             note_idx,
             fx_menu,
-        } = &mut self.grid_state.fx_menu
+        } = &mut self.cell_grid.shared_data.fx_menu
         else {
             return;
         };
 
         let Some(mut note) = Self::get_note(*note_idx, *voice_idx, state, project) else {
-            self.grid_state.fx_menu = FXMenuState::Closed;
+            self.cell_grid.shared_data.fx_menu = FXMenuState::Closed;
             return;
         };
 
@@ -404,7 +396,7 @@ impl PhraseUI {
             .response;
 
         if area_response.clicked() {
-            self.grid_state.fx_menu = FXMenuState::Closed;
+            self.cell_grid.shared_data.fx_menu = FXMenuState::Closed;
             return;
         }
 
@@ -436,8 +428,8 @@ impl PhraseUI {
                 }
             });
 
-        if open == false || ui.input(|i| i.key_pressed(Key::Escape)) {
-            self.grid_state.fx_menu = FXMenuState::Closed;
+        if !open || ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.cell_grid.shared_data.fx_menu = FXMenuState::Closed;
         }
     }
 

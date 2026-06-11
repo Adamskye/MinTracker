@@ -614,8 +614,6 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // TODO: deal with this later
 
     #[test]

@@ -1,5 +1,5 @@
 use eframe::egui::{Button, DragValue, Ui};
-use egui::{Align, Color32, Layout, ScrollArea, Stroke};
+use egui::{Align, Layout, ScrollArea};
 use egui_phosphor::regular::{PLUS, SLIDERS_HORIZONTAL, TRASH};
 
 use crate::{
