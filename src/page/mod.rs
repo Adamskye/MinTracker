@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use egui::Ui;
 
 use crate::{
@@ -29,46 +31,46 @@ pub trait Page {
 }
 
 pub struct Pages {
-    track: Box<dyn Page>,
-    chain: Box<dyn Page>,
-    phrase: Box<dyn Page>,
-    instrument: Box<dyn Page>,
-    preferences: Box<dyn Page>,
+    pages: HashMap<PageID, Box<dyn Page>>,
 }
 
 impl Pages {
     pub fn new() -> Self {
-        Self {
-            track: Box::<TrackUI>::default(),
-            chain: Box::<ChainUI>::default(),
-            phrase: Box::<PhraseUI>::default(),
-            instrument: Box::<InstrumentUI>::default(),
-            preferences: Box::<PreferencesUI>::default(),
+        macro_rules! page {
+            ($pid:expr,$page:ident) => {
+                ($pid, Box::<$page>::default() as Box<dyn Page>)
+            };
         }
+
+        let pages = vec![
+            page!(PageID::Track, TrackUI),
+            page!(PageID::Chain, ChainUI),
+            page!(PageID::Phrase, PhraseUI),
+            page!(PageID::Instrument, InstrumentUI),
+            page!(PageID::Preferences, PreferencesUI),
+        ]
+        .into_iter()
+        .collect();
+
+        Self { pages }
     }
 
     pub fn page_mut(&mut self, page_id: PageID) -> &mut dyn Page {
-        match page_id {
-            PageID::Track => &mut *self.track,
-            PageID::Chain => &mut *self.chain,
-            PageID::Phrase => &mut *self.phrase,
-            PageID::Instrument => &mut *self.instrument,
-            PageID::Preferences => &mut *self.preferences,
-        }
+        self.pages
+            .get_mut(&page_id)
+            .expect("Page not defined!")
+            .as_mut()
     }
 
     pub fn page(&self, page_id: PageID) -> &dyn Page {
-        match page_id {
-            PageID::Track => &*self.track,
-            PageID::Chain => &*self.chain,
-            PageID::Phrase => &*self.phrase,
-            PageID::Instrument => &*self.instrument,
-            PageID::Preferences => &*self.preferences,
-        }
+        self.pages
+            .get(&page_id)
+            .expect("Page not defined!")
+            .as_ref()
     }
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum PageID {
     #[default]
     Track,
