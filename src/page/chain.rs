@@ -1,10 +1,7 @@
 use std::sync::mpsc;
 
 use eframe::{
-    egui::{
-        RichText, ScrollArea, Ui,
-        util::undoer::{Settings, Undoer},
-    },
+    egui::{ScrollArea, Ui},
     epaint::Color32,
 };
 use egui::Event;
@@ -14,8 +11,7 @@ use crate::{
     AppUIState,
     page::{Page, PageID},
     project::{
-        Chain, ChainCmd, ChainRow, PhraseCmd, Project, ProjectLocation, ROWS_PER_CHAIN,
-        ROWS_PER_PHRASE,
+        ChainCmd, ChainRow, PhraseCmd, Project, ProjectLocation, ROWS_PER_CHAIN, ROWS_PER_PHRASE,
     },
     synth::{PlayerCmd, PlayerScope, ROProject},
     widget::cells::{self, CellData, CellGrid},
@@ -27,65 +23,85 @@ enum Clipboard {
     Empty,
     FullRows(Vec<ChainRow>),
     OnlyPhrases(Vec<Option<u32>>),
-    OnlyTransposes(Vec<f32>),
+    OnlyTransposes(Vec<i32>),
 }
 
-struct CellSharedState;
+#[derive(Default)]
+struct GridState {
+    playing_row: Option<usize>,
+}
 
 #[derive(Clone)]
-enum ChainCell {
+enum CellState {
     Phrase { row: usize, id: Option<u32> },
-    Transpose { row: usize, transpose: f32 },
+    Transpose { row: usize, transpose: i32 },
 }
 
-impl Default for ChainCell {
+impl Default for CellState {
     fn default() -> Self {
         Self::Phrase { row: 0, id: None }
     }
 }
 
-impl CellData<CellSharedState> for ChainCell {
+impl CellData<GridState> for CellState {
     fn text(&self) -> Option<String> {
         match self {
-            ChainCell::Phrase { id: None, .. } => Some(regular::MINUS.into()),
-            ChainCell::Phrase { id: Some(idx), .. } => Some(idx.to_string()),
-            ChainCell::Transpose { transpose, .. } => Some(transpose.to_string()),
+            CellState::Phrase { id: None, .. } => Some(regular::MINUS.into()),
+            CellState::Phrase { id: Some(idx), .. } => Some(idx.to_string()),
+            CellState::Transpose { transpose, .. } => Some(transpose.to_string()),
         }
     }
 
+    fn color(&self, _grid_state: &GridState) -> Color32 {
+        Color32::TRANSPARENT
+    }
+
+    fn has_inner_widget(&self, grid_state: &mut GridState) -> bool {
+        match self {
+            CellState::Phrase { row, .. } => Some(*row) == grid_state.playing_row,
+            _ => false,
+        }
+    }
+
+    fn inner_widget(&self, ui: &mut Ui, _: &mut GridState, _: &mut AppUIState, _: &Project) {
+        ui.horizontal_centered(|ui| {
+            ui.label(regular::CARET_RIGHT);
+        });
+    }
+
     fn has_context_menu(&self) -> bool {
-        matches!(self, ChainCell::Phrase { .. })
+        matches!(self, CellState::Phrase { .. })
     }
 
     fn context_menu(
         &self,
         ui: &mut Ui,
-        _grid_state: &mut CellSharedState,
+        _grid_state: &mut GridState,
         state: &mut AppUIState,
         project: &Project,
     ) {
         match self {
-            ChainCell::Phrase { row, .. } => {
+            CellState::Phrase { row, .. } => {
                 Self::context_menu_phrase(*row, ui, state, project);
             }
-            ChainCell::Transpose { .. } => {}
+            CellState::Transpose { .. } => {}
         }
     }
 
     fn trigger_action(
         &self,
-        _grid_state: &mut CellSharedState,
+        _grid_state: &mut GridState,
         state: &mut AppUIState,
         project: &Project,
     ) {
         match self {
-            ChainCell::Phrase { row, id: Some(id) } => {
+            CellState::Phrase { row, id: Some(id) } => {
                 // go to phrase screen
                 state.chain_selected_row = Some(*row);
                 state.viewed_phrase = Some(*id);
                 state.current_page = PageID::Phrase;
             }
-            ChainCell::Phrase { row, id: None } => {
+            CellState::Phrase { row, id: None } => {
                 // create phrase in chain
                 let Some((&id, _)) = project.phrases().iter().next() else {
                     return;
@@ -108,15 +124,15 @@ impl CellData<CellSharedState> for ChainCell {
     fn on_keyboard_input(
         &self,
         input: &egui::InputState,
-        _grid_state: &mut CellSharedState,
+        _grid_state: &mut GridState,
         state: &mut AppUIState,
         project: &Project,
     ) {
         match self {
-            ChainCell::Phrase { row, id: Some(id) } => {
+            CellState::Phrase { row, id: Some(id) } => {
                 Self::keyboard_input_phrase(*row, *id, input, _grid_state, state, project)
             }
-            ChainCell::Transpose { row, .. } => {
+            CellState::Transpose { row, .. } => {
                 Self::keyboard_input_transpose(*row, input, _grid_state, state, project)
             }
             _ => {}
@@ -124,7 +140,7 @@ impl CellData<CellSharedState> for ChainCell {
     }
 }
 
-impl ChainCell {
+impl CellState {
     fn context_menu_phrase(row: usize, ui: &mut Ui, ui_state: &AppUIState, project: &Project) {
         // get viewed chain
         // get current chain
@@ -203,12 +219,13 @@ impl ChainCell {
         row: usize,
         mut id: u32,
         input: &egui::InputState,
-        _grid_state: &mut CellSharedState,
+        _grid_state: &mut GridState,
         state: &mut AppUIState,
         project: &Project,
     ) {
         let inc_keybind = state.preferences().keybinds.increase;
         let dec_keybind = state.preferences().keybinds.decrease;
+        let del_keybind = state.preferences().keybinds.delete;
         let original_id = id;
 
         if input.key_pressed(dec_keybind) {
@@ -227,6 +244,12 @@ impl ChainCell {
                     break;
                 }
             }
+        } else if input.key_pressed(del_keybind) {
+            project.push_cmd(ChainCmd::UpdatePhrase {
+                id,
+                row_index: row,
+                new_phrase_id: None,
+            });
         }
 
         if id != original_id {
@@ -242,16 +265,16 @@ impl ChainCell {
     fn keyboard_input_transpose(
         row: usize,
         input: &egui::InputState,
-        _grid_state: &mut CellSharedState,
+        _grid_state: &mut GridState,
         state: &mut AppUIState,
         project: &Project,
     ) {
         let inc_keybind = state.preferences().keybinds.increase;
         let dec_keybind = state.preferences().keybinds.decrease;
         let change = if input.key_pressed(inc_keybind) {
-            1.0
+            1
         } else if input.key_pressed(dec_keybind) {
-            -1.0
+            -1
         } else {
             return;
         };
@@ -275,42 +298,21 @@ impl ChainCell {
             row_index: row,
             new_transpose: current_transpose + change,
         });
-
-        // project.push_event(ProjectEvent::UpdateChainNew {
-        //     id: viewed_chain,
-        //     new_chain: Arc::new(move |mut chain| {
-        //         if let Some(row) = chain.rows.get_mut(row) {
-        //             row.transpose += change;
-        //         }
-        //         chain
-        //     }),
-        // });
     }
 }
 
-#[derive(Clone, PartialEq, Default)]
-pub struct ChainUIState {
-    chain: Chain,
-    chain_id: u32,
-}
-
 pub struct ChainUI {
-    local_state: ChainUIState,
     clipboard: Clipboard,
-    undoer: Undoer<ChainUIState>,
-    cell_grid: CellGrid<ChainCell, CellSharedState>,
+    cell_grid: CellGrid<CellState, GridState>,
+    grid_state: GridState,
 }
 
 impl Default for ChainUI {
     fn default() -> Self {
         Self {
-            local_state: Default::default(),
-            undoer: Undoer::with_settings(Settings {
-                stable_time: 0.1,
-                ..Default::default()
-            }),
             clipboard: Default::default(),
             cell_grid: CellGrid::new(ROWS_PER_CHAIN, 2),
+            grid_state: GridState::default(),
         }
     }
 }
@@ -321,7 +323,6 @@ impl Page for ChainUI {
 
         self.handle_keybinds(ui, state, project);
 
-        //Self::handle_player_buffer(&self.local_state, state, project);
         ScrollArea::vertical().show(ui, |ui| {
             if chain_opt.is_some() {
                 self.show_phrase_list(ui, state, project);
@@ -330,9 +331,6 @@ impl Page for ChainUI {
             }
 
             ui.allocate_space(ui.available_size());
-
-            self.undoer
-                .feed_state(ui.input(|i| i.time), &self.local_state);
         });
     }
 
@@ -374,6 +372,28 @@ impl Page for ChainUI {
                 phrase_offset: last_phrase_offset,
                 note_offset: ROWS_PER_PHRASE - 1,
             }),
+        };
+
+        state.player.play(project, scope);
+    }
+
+    fn play_global(&self, state: &AppUIState, project: ROProject) {
+        let Some(chain_offset) = state.track_selected_row else {
+            return;
+        };
+
+        let num_tracks = project.read().unwrap().tracks().len();
+
+        let scope = PlayerScope {
+            first_notes: (0..num_tracks)
+                .map(|track_idx| ProjectLocation {
+                    track_idx,
+                    chain_offset,
+                    phrase_offset: self.cell_grid.highlighted_row(),
+                    note_offset: 0,
+                })
+                .collect(),
+            last_note: None,
         };
 
         state.player.play(project, scope);
@@ -422,101 +442,25 @@ impl ChainUI {
         }
     }
 
-    fn project_location_to_chain_id(project: &Project, location: &ProjectLocation) -> Option<u32> {
-        project
-            .tracks()
-            .get(location.track_idx)
-            .and_then(|track| track.chains.get(location.chain_offset))
-            .and_then(|chain_id| *chain_id)
-    }
-
-    fn handle_player_buffer(s: &ChainUIState, state: &AppUIState, project: &Project) {
-        let (scope_tx, scope_rx) = mpsc::channel();
-        let (buf_tx, buf_rx) = mpsc::channel();
-        state.player.send_command(PlayerCmd::RequestScope(scope_tx));
-        state.player.send_command(PlayerCmd::RequestBuffer(buf_tx));
-
-        let (Ok(scope), Ok(buf)) = (scope_rx.recv(), buf_rx.recv()) else {
-            return;
-        };
-
-        // if playing multiple (or no) tracks, abort function
-        if scope.first_notes.len() != 1 {
-            return;
-        }
-
-        let Some(scope_start) = &scope.first_notes.first() else {
-            return;
-        };
-        // there is always an end marker when playing just a chain
-        let Some(scope_end) = &scope.last_note else {
-            return;
-        };
-
-        // abort if not playing just a chain
-        // TODO: simplify this
-        if !(scope_start.phrase_offset < scope_end.phrase_offset
-            || scope_start.track_idx == scope_end.track_idx
-                && scope_start.chain_offset == scope_end.chain_offset
-            || scope_start.phrase_offset == scope_end.phrase_offset
-                && scope_start.note_offset <= scope_end.note_offset)
-        {
-            return;
-        }
-
-        // abort if playing same phrase_id that is being viewed
-        if Some(s.chain_id) == Self::project_location_to_chain_id(project, scope_start) {
-            return;
-        }
-
-        // abort if buffer is of the same phrase as is being viewed
-        if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone())
-            && let Some(buf_start) = first_notes.first()
-            && Self::project_location_to_chain_id(project, buf_start) == Some(s.chain_id)
-        {
-            return;
-        }
-
-        // update player buffer
-        let Some(track_idx) = state.viewed_track else {
-            return;
-        };
-        let Some(chain_offset) = state.track_selected_row else {
-            return;
-        };
-        let Some(last_phrase_offset) = Self::get_last_row_to_play(track_idx, chain_offset, project)
-        else {
-            return;
-        };
-        let new_buffer = PlayerScope {
-            first_notes: vec![ProjectLocation {
-                track_idx,
-                chain_offset,
-                phrase_offset: 0,
-                note_offset: 0,
-            }]
-            .into(),
-            last_note: Some(ProjectLocation {
-                track_idx,
-                chain_offset,
-                phrase_offset: last_phrase_offset,
-                note_offset: ROWS_PER_PHRASE - 1,
-            }),
-        };
-
-        state
-            .player
-            .send_command(PlayerCmd::UpdateBuffer(new_buffer));
-    }
-
-    fn show_phrase_list(&mut self, ui: &mut Ui, ui_state: &mut AppUIState, project: &Project) {
+    fn playing_row(&self, state: &AppUIState) -> Option<usize> {
         let (tx, rx) = mpsc::channel();
-        ui_state.player.send_command(PlayerCmd::RequestLocation(tx));
-        let _position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
+        state.player.send_command(PlayerCmd::RequestLocation(tx));
+        let positions = rx.recv().ok()?;
 
-        // add phrases to cell grid
+        if let Some(pos) = positions.iter().flatten().find(|pos| {
+            Some(pos.track_idx) == state.viewed_track
+                && Some(pos.chain_offset) == state.track_selected_row
+        }) {
+            Some(pos.phrase_offset)
+        } else {
+            None
+        }
+    }
 
-        let Some(chain) = ui_state
+    fn show_phrase_list(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
+        self.grid_state.playing_row = self.playing_row(state);
+
+        let Some(chain) = state
             .viewed_chain
             .and_then(|chain_id| project.chains().get(&chain_id))
         else {
@@ -527,7 +471,7 @@ impl ChainUI {
             self.cell_grid.set(
                 row_idx,
                 0,
-                ChainCell::Phrase {
+                CellState::Phrase {
                     row: row_idx,
                     id: row.phrase,
                 },
@@ -535,7 +479,7 @@ impl ChainUI {
             self.cell_grid.set(
                 row_idx,
                 1,
-                ChainCell::Transpose {
+                CellState::Transpose {
                     row: row_idx,
                     transpose: row.transpose,
                 },
@@ -545,36 +489,10 @@ impl ChainUI {
         cells::cells(
             ui,
             &mut self.cell_grid,
-            &mut CellSharedState {},
-            ui_state,
+            &mut self.grid_state,
+            state,
             project,
         );
-    }
-
-    fn position_indicator(
-        ui: &mut Ui,
-        position_opt: &Option<Vec<Option<ProjectLocation>>>,
-        state: &AppUIState,
-        row: usize,
-    ) {
-        let is_playing = position_opt
-            .as_ref()
-            .and_then(|position| {
-                position.iter().filter_map(|it_opt| *it_opt).find(|it| {
-                    Some(it.track_idx) == state.viewed_track
-                        && Some(it.chain_offset) == state.track_selected_row
-                        && it.phrase_offset == row
-                })
-            })
-            .is_some();
-
-        let pos_indicator = RichText::new(">").color(if is_playing {
-            Color32::RED
-        } else {
-            Color32::TRANSPARENT
-        });
-
-        ui.label(pos_indicator);
     }
 
     fn up_down_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
@@ -611,17 +529,6 @@ impl ChainUI {
                 state.viewed_chain = Some(*chain_id);
                 break;
             }
-        }
-    }
-
-    fn delete_selection(chain: &mut Chain, row1: usize, row2: usize) {
-        for row in chain
-            .rows
-            .iter_mut()
-            .take(row1.max(row2) + 1)
-            .skip(row1.min(row2))
-        {
-            *row = ChainRow::default();
         }
     }
 
@@ -682,25 +589,20 @@ impl ChainUI {
         match &self.clipboard {
             Clipboard::Empty => return,
             Clipboard::FullRows(chain_rows) => {
-                for (this_row, clipboard_row) in chain
-                    .rows
-                    .iter_mut()
-                    .skip(start_row)
-                    .zip(chain_rows.into_iter())
+                for (this_row, clipboard_row) in
+                    chain.rows.iter_mut().skip(start_row).zip(chain_rows.iter())
                 {
                     *this_row = clipboard_row.clone();
                 }
             }
             Clipboard::OnlyPhrases(items) => {
-                for (row, phrase_id_opt) in
-                    chain.rows.iter_mut().skip(start_row).zip(items.into_iter())
+                for (row, phrase_id_opt) in chain.rows.iter_mut().skip(start_row).zip(items.iter())
                 {
                     row.phrase = *phrase_id_opt;
                 }
             }
             Clipboard::OnlyTransposes(items) => {
-                for (row, transpose) in chain.rows.iter_mut().skip(start_row).zip(items.into_iter())
-                {
+                for (row, transpose) in chain.rows.iter_mut().skip(start_row).zip(items.iter()) {
                     row.transpose = *transpose;
                 }
             }
@@ -711,20 +613,5 @@ impl ChainUI {
             id: state.viewed_chain.unwrap(),
             new_chain: chain,
         });
-    }
-
-    fn clone_phrase(phrase_id_opt: &mut Option<u32>, project: &Project) {
-        let Some(new_phrase) = phrase_id_opt
-            .and_then(|phrase_id| project.phrases().get(&phrase_id))
-            .cloned()
-            .map(Box::new)
-        else {
-            return;
-        };
-
-        let id = Project::get_unique_key(project.phrases());
-        project.push_cmd(PhraseCmd::Update { id, new_phrase });
-
-        *phrase_id_opt = Some(id);
     }
 }

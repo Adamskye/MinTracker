@@ -48,7 +48,7 @@ pub enum ChainCmd {
     UpdateTranspose {
         id: u32,
         row_index: usize,
-        new_transpose: f32,
+        new_transpose: i32,
     },
 }
 
@@ -507,6 +507,7 @@ impl Project {
         ));
     }
 
+    /// Increments project location, or returns None if the end was reached.
     pub fn increment_project_location(&self, location: ProjectLocation) -> Option<ProjectLocation> {
         self.get_notes_at_location(location)?;
         let mut new_location = location;
@@ -584,14 +585,14 @@ impl Project {
         map.keys().last().unwrap_or(&0) + 1 + n as u32
     }
 
-    pub fn get_note_transpose_semitones(&self, location: ProjectLocation) -> Option<f32> {
+    pub fn get_note_transpose_semitones(&self, location: ProjectLocation) -> Option<i32> {
         // All the places that notes can be transposed:
         // - project-wide
         // - track
         // - a phrase can be transposed inside a chain
         // - an instrument??? (todo)
 
-        let project_trans = self.settings().transpose as f32;
+        let project_trans = self.settings().transpose as i32;
         let track = self
             .tracks()
             .get(location.track_idx)?
@@ -605,7 +606,7 @@ impl Project {
             .and_then(|chain_id| self.chains().get(&chain_id))
             .and_then(|chain| chain.rows.get(location.phrase_offset))
             .map(|row| row.transpose)
-            .unwrap_or(0.0);
+            .unwrap_or(0);
 
         Some(project_trans + track + inside_chain)
     }

@@ -11,6 +11,8 @@ pub struct Keybinds {
     pub increase: Key,
     pub decrease: Key,
 
+    pub delete: Key,
+
     pub play_pause: Key,
 
     pub show_tracks: Key,
@@ -32,6 +34,8 @@ impl Default for Keybinds {
 
             increase: Key::Equals,
             decrease: Key::Minus,
+
+            delete: Key::Delete,
 
             play_pause: Key::Space,
 

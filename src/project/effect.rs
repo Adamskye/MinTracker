@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::project::Semitone;
+
 use super::ADSREnvelope;
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -22,6 +24,10 @@ pub struct NoteEffects {
 }
 
 impl NoteEffects {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
     /// adds effects from another NoteEffects struct
     pub fn add_from_other(&mut self, other: &NoteEffects) {
         macro_rules! add_effect {
@@ -77,9 +83,9 @@ pub struct PitchBendEffect {
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SlideEffect {
     /// attached when effect is added
-    pub start_semitone: Option<u8>,
+    pub start_semitone: Option<Semitone>,
     /// attached when effect is added
-    pub end_semitone: Option<u8>,
+    pub end_semitone: Option<Semitone>,
     pub time_ticks: f32,
 }
 

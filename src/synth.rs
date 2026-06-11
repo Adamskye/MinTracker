@@ -2,8 +2,8 @@ use std::{
     cell::RefCell,
     f32::consts::PI,
     sync::{
-        mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError},
         Arc, LockResult, RwLock, RwLockReadGuard,
+        mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError},
     },
     time::{Duration, Instant},
 };
@@ -14,7 +14,7 @@ use crate::{
     helpers,
     project::{
         InstrumentDataTable, InstrumentVariant, NoteEffects, Project, ProjectLocation,
-        ProjectSettings, SlideEffect, TrackSettings, VOICES_PER_TRACK,
+        ProjectSettings, Semitone, SlideEffect, TrackSettings, VOICES_PER_TRACK,
     },
 };
 
@@ -46,6 +46,8 @@ pub enum PlayerCmd {
     RequestBuffer(Sender<Option<Arc<PlayerScope>>>),
 }
 
+// When playing anything, a PlayerScope is defined per track. That track will stop playing when the
+// last note is hit, or it will play until the end if last_note is set to None.
 #[derive(Clone)]
 pub struct PlayerScope {
     pub first_notes: Arc<[ProjectLocation]>,
@@ -68,44 +70,6 @@ impl Player {
         std::thread::spawn(move || {
             Self::play_thread(project, Arc::new(scope), rx);
         });
-    }
-
-    #[allow(dead_code)]
-    fn is_playing_a_chain(
-        start: Arc<[ProjectLocation]>,
-        last_note: Option<&ProjectLocation>,
-    ) -> bool {
-        let Some(last_note) = last_note else {
-            return false;
-        };
-
-        let Some(first_note) = start.first() else {
-            return false;
-        };
-
-        first_note.track_idx == last_note.track_idx
-            && first_note.chain_offset == last_note.chain_offset
-            && first_note.phrase_offset <= last_note.phrase_offset
-            && first_note.note_offset <= last_note.note_offset
-    }
-
-    #[allow(dead_code)]
-    fn is_playing_a_phrase(
-        start: Arc<[ProjectLocation]>,
-        last_note: Option<&ProjectLocation>,
-    ) -> bool {
-        let Some(last_note) = last_note else {
-            return false;
-        };
-
-        let Some(start) = start.first() else {
-            return false;
-        };
-
-        start.track_idx == last_note.track_idx
-            && start.chain_offset == last_note.chain_offset
-            && start.phrase_offset == last_note.phrase_offset
-            && start.note_offset <= last_note.note_offset
     }
 
     pub fn is_playing(&self) -> bool {
@@ -204,7 +168,7 @@ impl Player {
                 break;
             }
 
-            // start playing note
+            // start playing notes
             i = i.saturating_add(1);
 
             let Ok(project) = project.read() else {
@@ -221,6 +185,7 @@ impl Player {
 
                 all_tracks_finished = false;
 
+                // play notes in each voice
                 for voice_idx in 0..VOICES_PER_TRACK {
                     note_pool.play_note(voice_idx, &project, track_location);
                 }
@@ -301,9 +266,9 @@ impl NotePool {
             .instrument
             .and_then(|inst_id| project.instruments().get(&inst_id));
 
-        let (Some(semitone), Some(instrument)) = (note.semitone(), instrument_opt) else {
+        let (Some(semitone), Some(instrument)) = (note.semitone, instrument_opt) else {
             // if note does not have an assigned semitone but does have effects
-            if note.has_effects() {
+            if !note.effects.is_empty() {
                 self.send_message(
                     location.track_idx,
                     voice,
@@ -314,7 +279,7 @@ impl NotePool {
         };
 
         // attach start and end semitones if the note has a slide effect
-        let semitone_opt = note.semitone();
+        let semitone_opt = note.semitone;
         if let Some(slide_effect) = &mut note.effects.slide {
             let (tx, rx) = mpsc::channel();
 
@@ -323,7 +288,7 @@ impl NotePool {
 
             // start semitone
             self.send_message(location.track_idx, voice, OscillatorMsg::GetFrequency(tx));
-            slide_effect.start_semitone = rx.recv().ok().map(helpers::semitone_from_frequency);
+            slide_effect.start_semitone = rx.recv().ok().map(Semitone::from_frequency);
         }
 
         // access tracklist and resize if needed
@@ -334,7 +299,7 @@ impl NotePool {
 
         let Some(data_table) = instrument
             .data_table_map
-            .get(semitone as usize)
+            .get::<usize>(semitone.into())
             .cloned()
             .flatten()
             .and_then(|index| instrument.data_tables.get(index))
@@ -345,12 +310,9 @@ impl NotePool {
 
         let (wo, tx) = WavetableOscillator::with_frequency(
             data_table,
-            helpers::frequency_from_semitone(
-                semitone as f32
-                    + project
-                        .get_note_transpose_semitones(*location)
-                        .unwrap_or(0.0),
-            ),
+            semitone
+                .transposed_by(project.get_note_transpose_semitones(*location).unwrap_or(0))
+                .frequency(),
         );
         let wo = wo.stoppable().amplify(0.2);
 
@@ -592,15 +554,14 @@ impl WavetableOscillator {
                             break 'block 1.0;
                         }
 
-                        let start_semitone = start_semitone as f64;
-                        let end_semitone = end_semitone as f64;
+                        let start_semitone = start_semitone.value() as f64;
+                        let end_semitone = end_semitone.value() as f64;
 
                         let actual_semitone = start_semitone
                             + (((end_semitone - start_semitone) / total_samples)
                                 * self.slide_counter as f64);
 
-                        let actual_frequency =
-                            helpers::frequency_from_semitone(actual_semitone as f32);
+                        let actual_frequency = Semitone::from(actual_semitone as f32).frequency();
 
                         let multiplier = actual_frequency / self.frequency;
 

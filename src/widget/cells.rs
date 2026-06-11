@@ -28,6 +28,8 @@ impl GridSelection {
     }
 }
 
+/// T is the data stored in each cell
+/// G is the data shared across all cells
 pub struct CellGrid<T, G>
 where
     T: Default + Clone + CellData<G>,
@@ -123,8 +125,10 @@ where
 }
 
 pub trait CellData<G> {
+    /// String to be displayed within cell.
     fn text(&self) -> Option<String>;
 
+    /// Inner widget of cell. Only called if has_inner_widget returns true.
     fn inner_widget(
         &self,
         _ui: &mut Ui,
@@ -134,17 +138,20 @@ pub trait CellData<G> {
     ) {
     }
 
+    /// Whether this cell has an inner widget.
     fn has_inner_widget(&self, _grid_state: &mut G) -> bool {
         false
     }
 
-    #[allow(unused)]
-    fn color(&self) -> Color32 {
+    /// Background colour of cell.
+    fn color(&self, _grid_state: &G) -> Color32 {
         Color32::TRANSPARENT
     }
 
     /// Whether this cell has a context menu when right-clicked.
-    fn has_context_menu(&self) -> bool;
+    fn has_context_menu(&self) -> bool {
+        false
+    }
 
     /// Context menu when right-clicked. Only shows if has_context_menu() returns true.
     fn context_menu(
@@ -177,11 +184,13 @@ pub trait CellData<G> {
     ) {
     }
 
+    /// Whether cursor can highlight this cell.
     fn highlightable(&self) -> bool {
         true
     }
 
-    fn selectable(&self) -> bool {
+    /// Whether this cell can be part of a multi-cell selection.
+    fn multiselectable(&self) -> bool {
         true
     }
 }
@@ -325,42 +334,49 @@ pub fn cells<T, G>(
                 continue;
             };
 
-            // draw cell
             let painter = ui.painter();
+
+            // drawing background (if not transparent)
+            let cell_color = cell_data.color(grid_state);
+            if cell_color != Color32::TRANSPARENT {
+                painter.rect_filled(cell_rect, 0.0, cell_color);
+            }
+
+            // drawing border
+            if cell_is_highlighted {
+                // highlighted
+                let stroke = Stroke::new(2.0, to_colour32(sel_col));
+                painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
+            } else if response.hovered() || response.is_pointer_button_down_on() {
+                // mouse over
+                let stroke = Stroke::new(
+                    2.0,
+                    to_colour32(state.preferences().style.colours.button_bg),
+                );
+                painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
+            }
+
+            // multiple cell selection
+            if let Some(selection) = &env.selection
+                && cell_data.multiselectable()
+            {
+                let (start_row, start_col) = selection.first;
+                let (end_row, end_col) = selection.last;
+
+                if row >= start_row.min(end_row)
+                    && row <= start_row.max(end_row)
+                    && column >= start_col.min(end_col)
+                    && column <= start_col.max(end_col)
+                {
+                    let colour = to_colour32(sel_col).linear_multiply(0.5);
+                    let stroke = Stroke::new(2.0, colour);
+                    painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
+                }
+            }
+
+            // drawing text (if any)
             let text = cell_data.text();
             if let Some(text) = &text {
-                // drawing border
-                if cell_is_highlighted {
-                    // highlighted
-                    let stroke = Stroke::new(2.0, to_colour32(sel_col));
-                    painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
-                } else if response.hovered() || response.is_pointer_button_down_on() {
-                    // mouse over
-                    let stroke = Stroke::new(
-                        2.0,
-                        to_colour32(state.preferences().style.colours.button_bg),
-                    );
-                    painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
-                }
-
-                // multiple cell selection
-                if let Some(selection) = &env.selection
-                    && cell_data.selectable()
-                {
-                    let (start_row, start_col) = selection.first;
-                    let (end_row, end_col) = selection.last;
-
-                    if row >= start_row.min(end_row)
-                        && row <= start_row.max(end_row)
-                        && column >= start_col.min(end_col)
-                        && column <= start_col.max(end_col)
-                    {
-                        let colour = to_colour32(sel_col).linear_multiply(0.5);
-                        let stroke = Stroke::new(2.0, colour);
-                        painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
-                    }
-                }
-
                 painter.text(
                     cell_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -370,6 +386,7 @@ pub fn cells<T, G>(
                 );
             }
 
+            // drawing inner widget (if any)
             if cell_data.has_inner_widget(grid_state) {
                 let mut ui = ui.new_child(UiBuilder::new().max_rect(cell_rect));
                 cell_data.inner_widget(&mut ui, grid_state, state, project);
@@ -389,7 +406,7 @@ pub fn cells<T, G>(
                 });
             }
 
-            // context menu
+            // open context menu (if applicable)
             let mut context_menu_opened = false;
             if cell_data.has_context_menu() {
                 response.context_menu(|ui| {
@@ -398,6 +415,7 @@ pub fn cells<T, G>(
                 });
             }
 
+            // custom click action
             if response.clicked() {
                 cell_data.on_click(grid_state, state, project);
             }
@@ -421,6 +439,7 @@ pub fn cells<T, G>(
                 });
             }
 
+            // expanding/shrinking multiple cell selection
             if response.dragged() {
                 // get which cell the mouse is currently over
                 let mouse_pos = ui.input(|i| i.pointer.interact_pos());

@@ -1,116 +1,248 @@
 use std::sync::mpsc;
 
-use eframe::{
-    egui::{
-        self, Button, Key, Label, Response, RichText, ScrollArea, Sense, Ui,
-        util::undoer::{Settings, Undoer},
-    },
-    epaint::{Color32, Stroke},
-};
-use egui_phosphor::regular;
+use egui::{Align2, Color32, Key, ScrollArea, Sense, Ui, Vec2, viewport};
+use egui_phosphor::regular::{self, FUNCTION, MINUS};
 
 use crate::{
-    AppUIState,
+    app_ui_state::AppUIState,
     effects_menu::EffectsMenu,
     page::Page,
-    project::{MID_A_SEMITONE, Note, Phrase, Project, ProjectLocation, ROWS_PER_PHRASE},
-    selection::{self, SelectionCoords},
+    project::{
+        Note, NoteEffects, Phrase, PhraseCmd, Project, ProjectLocation, ROWS_PER_PHRASE, Semitone,
+        VOICES_PER_TRACK,
+    },
     synth::{PlayerCmd, PlayerScope, ROProject},
+    widget::cells::{CellData, CellGrid, cells},
 };
 
-type Clipboard = Vec<Vec<Note>>;
-
-#[derive(Default, Clone, PartialEq)]
-enum Tool {
+#[derive(Default)]
+enum FXMenuState {
     #[default]
-    Edit,
-    Select(SelectionCoords),
+    Closed,
+    Open {
+        voice_idx: usize,
+        note_idx: usize,
+        fx_menu: EffectsMenu,
+    },
 }
 
-#[derive(Clone, PartialEq)]
-pub struct PhraseUIState {
-    last_note_semitone: u8,
-    effects_menu: EffectsMenu,
-    phrase: Phrase,
-    phrase_id: u32,
+#[derive(Default)]
+struct GridState {
+    playing_row: Option<usize>,
+    last_semitone: Semitone,
+    fx_menu: FXMenuState,
 }
 
-impl Default for PhraseUIState {
-    fn default() -> Self {
-        Self {
-            last_note_semitone: MID_A_SEMITONE,
-            phrase: Phrase::default(),
-            phrase_id: Default::default(),
-            effects_menu: EffectsMenu::default(),
+#[derive(Default, Clone)]
+enum CellState {
+    #[default]
+    Empty,
+    Note {
+        note: Note,
+        row: usize,
+        voice: usize,
+    },
+    AddEffect {
+        row: usize,
+        voice: usize,
+    },
+}
+
+impl CellData<GridState> for CellState {
+    fn text(&self) -> Option<String> {
+        match self {
+            CellState::Empty => None,
+            CellState::Note { note, .. } => {
+                Some(note.semitone.map(|s| s.to_string()).unwrap_or(MINUS.into()))
+            }
+            CellState::AddEffect { .. } => Some(FUNCTION.into()),
         }
+    }
+
+    fn inner_widget(&self, ui: &mut Ui, _: &mut GridState, _: &mut AppUIState, _: &Project) {
+        // player indicator
+        ui.horizontal_centered(|ui| {
+            ui.label(regular::CARET_RIGHT);
+        });
+    }
+
+    fn has_inner_widget(&self, grid_state: &mut GridState) -> bool {
+        matches!(self, CellState::Note { row, .. } if Some(*row) == grid_state.playing_row)
+    }
+
+    fn trigger_action(
+        &self,
+        grid_state: &mut GridState,
+        state: &mut AppUIState,
+        project: &Project,
+    ) {
+        let Some(phrase_id) = state.viewed_phrase else {
+            return;
+        };
+
+        match self {
+            CellState::Empty => {}
+            CellState::Note { note, row, voice } => {
+                if note.semitone.is_none() {
+                    project.push_cmd(PhraseCmd::UpdateNote {
+                        id: phrase_id,
+                        voice_index: *voice,
+                        note_index: *row,
+                        new_note: Note {
+                            semitone: Some(grid_state.last_semitone),
+                            effects: NoteEffects::default(),
+                        },
+                    });
+                }
+            }
+            CellState::AddEffect { .. } => {
+                self.on_click(grid_state, state, project);
+            }
+        }
+    }
+
+    fn on_click(&self, grid_state: &mut GridState, _state: &mut AppUIState, _project: &Project) {
+        match self {
+            CellState::AddEffect { row, voice } => {
+                grid_state.fx_menu = FXMenuState::Open {
+                    voice_idx: *voice,
+                    note_idx: *row,
+                    fx_menu: EffectsMenu::default(),
+                };
+            }
+            _ => {}
+        }
+    }
+
+    fn on_keyboard_input(
+        &self,
+        input: &egui::InputState,
+        grid_state: &mut GridState,
+        state: &mut AppUIState,
+        project: &Project,
+    ) {
+        let Self::Note { note, row, voice } = self else {
+            return;
+        };
+        let mut note = note.clone();
+
+        // get the currently viewed phrase
+        let Some(phrase_id) = state.viewed_phrase else {
+            return;
+        };
+
+        if input.key_pressed(state.preferences().keybinds.increase) {
+            note.semitone = note.semitone.map(|s| s.transposed_by(1));
+            if note.semitone.is_none() {
+                note.semitone = Some(grid_state.last_semitone);
+            }
+        } else if input.key_pressed(state.preferences().keybinds.decrease) {
+            note.semitone = note.semitone.map(|s| s.transposed_by(-1));
+            if note.semitone.is_none() {
+                note.semitone = Some(grid_state.last_semitone);
+            }
+        } else if input.key_pressed(state.preferences().keybinds.delete) {
+            note.semitone = None;
+        } else {
+            return;
+        }
+
+        if let Some(s) = note.semitone {
+            grid_state.last_semitone = s;
+        }
+
+        project.push_cmd(PhraseCmd::UpdateNote {
+            id: phrase_id,
+            voice_index: *voice,
+            note_index: *row,
+            new_note: note,
+        });
+    }
+
+    fn highlightable(&self) -> bool {
+        true
+    }
+
+    fn multiselectable(&self) -> bool {
+        matches!(self, CellState::Note { .. })
     }
 }
 
 pub struct PhraseUI {
-    local_state: PhraseUIState,
-    tool: Tool,
-    clipboard: Clipboard,
-    undoer: Undoer<PhraseUIState>,
+    cell_grid: CellGrid<CellState, GridState>,
+    grid_state: GridState,
 }
 
 impl Default for PhraseUI {
     fn default() -> Self {
         Self {
-            local_state: Default::default(),
-            undoer: Undoer::with_settings(Settings {
-                stable_time: 0.1,
-                ..Default::default()
-            }),
-            clipboard: Vec::new(),
-            tool: Tool::default(),
+            cell_grid: CellGrid::new(ROWS_PER_PHRASE, VOICES_PER_TRACK * 2),
+            grid_state: GridState::default(),
         }
     }
 }
 
 impl Page for PhraseUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        let phrase_opt = state
+        // set up cell grid
+        let Some(phrase) = state
             .viewed_phrase
-            .and_then(|id| project.phrases().get(&id));
-
-        Self::handle_player_buffer(&self.local_state, state, project);
+            .and_then(|id| project.phrases().get(&id))
+        else {
+            ui.label("No valid phrase selected");
+            ui.allocate_space(ui.available_size());
+            return;
+        };
 
         ScrollArea::both().show(ui, |ui| {
-            if let (Some(phrase), Some(id)) = (phrase_opt, state.viewed_phrase) {
-                if self.local_state.phrase != *phrase {
-                    self.local_state.phrase = phrase.clone();
-                }
-                self.local_state.phrase_id = id;
-
-                self.handle_keybinds(ui);
-                self.show_voices(ui, project, state);
-            } else {
-                ui.label("No valid phrase selected");
-            }
-
+            self.show_notes(phrase, ui, state, project);
             ui.allocate_space(ui.available_size());
-
-            self.undoer
-                .feed_state(ui.input(|i| i.time), &self.local_state);
         });
+
+        if matches!(self.grid_state.fx_menu, FXMenuState::Open { .. }) {
+            self.show_fx_menu(ui, state, project);
+        }
     }
 
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        self.up_down_side_buttons(ui, state, project);
-
-        ui.add_sized([40.0, 20.0], egui::Separator::default().horizontal());
-
-        let selection = if let Tool::Select(selection) = self.tool {
-            selection
-        } else {
-            None
+        let Some(current_row) = state.chain_selected_row else {
+            return;
         };
 
-        ui.selectable_value(&mut self.tool, Tool::Edit, "Edit");
-        ui.selectable_value(&mut self.tool, Tool::Select(selection), "Select");
-    }
+        let Some(chain) = state
+            .viewed_chain
+            .and_then(|chain_idx| project.chains().get(&chain_idx))
+        else {
+            return;
+        };
 
-    fn handle_undo(&mut self, _project: &Project) {}
+        if ui.small_button(regular::ARROW_UP).clicked() {
+            if let Some((new_idx, new_row)) = chain
+                .rows
+                .iter()
+                .enumerate()
+                .take(current_row)
+                .rev()
+                .find(|(_, row)| row.phrase.is_some())
+            {
+                state.chain_selected_row = Some(new_idx);
+                state.viewed_phrase = new_row.phrase;
+            }
+        }
+
+        if ui.small_button(regular::ARROW_DOWN).clicked() {
+            if let Some((new_idx, new_row)) = chain
+                .rows
+                .iter()
+                .enumerate()
+                .skip(current_row + 1)
+                .find(|(_, row)| row.phrase.is_some())
+            {
+                state.chain_selected_row = Some(new_idx);
+                state.viewed_phrase = new_row.phrase;
+            }
+        }
+    }
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let (Some(track_idx), Some(chain_offset), Some(phrase_offset)) = (
@@ -121,17 +253,12 @@ impl Page for PhraseUI {
             return;
         };
 
-        let note_offset = match self.tool {
-            Tool::Select(Some(((_, row1), (_, row2)))) => std::cmp::min(row1, row2),
-            _ => 0,
-        };
-
         let scope = PlayerScope {
             first_notes: vec![ProjectLocation {
                 track_idx,
                 chain_offset,
                 phrase_offset,
-                note_offset,
+                note_offset: 0,
             }]
             .into(),
             last_note: Some(ProjectLocation {
@@ -151,415 +278,145 @@ impl Page for PhraseUI {
 }
 
 impl PhraseUI {
-    fn project_location_to_phrase_id(project: &Project, location: &ProjectLocation) -> Option<u32> {
-        project
-            .tracks()
-            .get(location.track_idx)
-            .and_then(|track| track.chains.get(location.chain_offset))
-            .and_then(|chain_id| *chain_id)
-            .and_then(|chain_id| project.chains().get(&chain_id))
-            .and_then(|chain| chain.rows.get(location.phrase_offset))
-            .and_then(|row| row.phrase)
-    }
+    fn show_notes(
+        &mut self,
+        phrase: &Phrase,
+        ui: &mut Ui,
+        state: &mut AppUIState,
+        project: &Project,
+    ) {
+        // set up cell grid
+        for (voice_idx, voice) in phrase.voices.iter().enumerate() {
+            for (note_idx, note) in voice.notes.iter().enumerate() {
+                // showing note
+                self.cell_grid.set(
+                    note_idx,
+                    voice_idx * 2,
+                    CellState::Note {
+                        note: note.clone(),
+                        row: note_idx,
+                        voice: voice_idx,
+                    },
+                );
 
-    fn handle_player_buffer(s: &PhraseUIState, state: &AppUIState, project: &Project) {
-        let (scope_tx, scope_rx) = mpsc::channel();
-        let (buf_tx, buf_rx) = mpsc::channel();
-        state.player.send_command(PlayerCmd::RequestScope(scope_tx));
-        state.player.send_command(PlayerCmd::RequestBuffer(buf_tx));
-
-        let (Ok(scope), Ok(buf)) = (scope_rx.recv(), buf_rx.recv()) else {
-            return;
-        };
-
-        // if playing multiple (or no) tracks, abort function
-        if scope.first_notes.len() != 1 {
-            return;
-        }
-
-        let Some(scope_start) = &scope.first_notes.first() else {
-            return;
-        };
-        // there is always an end marker when playing just a phrase
-        let Some(scope_end) = &scope.last_note else {
-            return;
-        };
-
-        // abort if not playing just a phrase
-        if !(scope_start.track_idx == scope_end.track_idx
-            && scope_start.chain_offset == scope_end.chain_offset
-            && scope_start.phrase_offset == scope_end.phrase_offset
-            && scope_start.note_offset <= scope_end.note_offset)
-        {
-            return;
-        }
-
-        // abort if playing same phrase_id that is being viewed
-        if Some(s.phrase_id) == Self::project_location_to_phrase_id(project, scope_start) {
-            return;
-        }
-
-        // abort if buffer is of the same phrase as is being viewed
-        if let Some(first_notes) = buf.map(|buf| buf.first_notes.clone())
-            && let Some(buf_start) = first_notes.first()
-            && Self::project_location_to_phrase_id(project, buf_start) == Some(s.phrase_id)
-        {
-            return;
-        }
-
-        // update player buffer
-        let Some(track_idx) = state.viewed_track else {
-            return;
-        };
-        let Some(chain_offset) = state.track_selected_row else {
-            return;
-        };
-        let Some(phrase_offset) = state.chain_selected_row else {
-            return;
-        };
-        let new_buffer = PlayerScope {
-            first_notes: vec![ProjectLocation {
-                track_idx,
-                chain_offset,
-                phrase_offset,
-                note_offset: 0,
-            }]
-            .into(),
-            last_note: Some(ProjectLocation {
-                track_idx,
-                chain_offset,
-                phrase_offset,
-                note_offset: ROWS_PER_PHRASE - 1,
-            }),
-        };
-
-        state
-            .player
-            .send_command(PlayerCmd::UpdateBuffer(new_buffer));
-    }
-
-    fn handle_keybinds(&mut self, ui: &mut Ui) {
-        if ui.input(|i| i.key_pressed(Key::E)) {
-            self.tool = Tool::Edit;
-        } else if ui.input(|i| i.key_pressed(Key::S)) {
-            self.tool = Tool::Select(None);
-        }
-    }
-
-    fn show_voices(&mut self, ui: &mut Ui, project: &Project, state: &AppUIState) {
-        ui.horizontal(|ui| {
-            Self::show_play_pos_indicator(ui, state);
-            for i_voice in 0..self.local_state.phrase.voices.len() {
-                self.show_voice(ui, i_voice, project);
+                // button to select effects
+                self.cell_grid.set(
+                    note_idx,
+                    (voice_idx * 2) + 1,
+                    CellState::AddEffect {
+                        row: note_idx,
+                        voice: voice_idx,
+                    },
+                );
             }
-        });
+        }
+
+        // determine which row is playing
+        self.grid_state.playing_row = self.playing_row(state);
+
+        cells(
+            ui,
+            &mut self.cell_grid,
+            &mut self.grid_state,
+            state,
+            project,
+        );
     }
 
-    fn show_play_pos_indicator(ui: &mut Ui, state: &AppUIState) {
+    fn playing_row(&self, state: &AppUIState) -> Option<usize> {
         let (tx, rx) = mpsc::channel();
         state.player.send_command(PlayerCmd::RequestLocation(tx));
-        let position_opt = rx.recv().ok();
+        let positions = rx.recv().ok()?;
+        let track_idx = state.viewed_track?;
 
-        ui.vertical(|ui| {
-            for row in 0..ROWS_PER_PHRASE {
-                let is_playing = position_opt
-                    .as_ref()
-                    .and_then(|position| {
-                        position.iter().filter_map(|it_opt| *it_opt).find(|it| {
-                            Some(it.track_idx) == state.viewed_track
-                                && Some(it.chain_offset) == state.track_selected_row
-                                && Some(it.phrase_offset) == state.chain_selected_row
-                                && it.note_offset == row
-                        })
-                    })
-                    .is_some();
+        let pos = positions.iter().flatten().find(|pos| {
+            pos.track_idx == track_idx
+                && Some(pos.chain_offset) == state.track_selected_row
+                && Some(pos.phrase_offset) == state.chain_selected_row
+        })?;
 
-                let pos_indicator = RichText::new(">").color(if is_playing {
-                    Color32::RED
-                } else {
-                    Color32::TRANSPARENT
-                });
-
-                ui.add_sized([20.0, 20.0], Label::new(pos_indicator));
-            }
-        });
+        Some(pos.note_offset)
     }
 
-    fn show_voice(&mut self, ui: &mut Ui, voice_id: usize, project: &Project) {
-        let Some(num_notes) = self
-            .local_state
-            .phrase
-            .voices
-            .get_mut(voice_id)
-            .map(|voice| voice.notes.len())
+    fn show_fx_menu(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
+        let Some(phrase_id) = state.viewed_phrase else {
+            return;
+        };
+
+        let FXMenuState::Open {
+            voice_idx,
+            note_idx,
+            fx_menu,
+        } = &mut self.grid_state.fx_menu
         else {
             return;
         };
 
-        ui.vertical(|ui| {
-            for row in 0..num_notes {
-                self.note_controller(ui, row, voice_id, project);
-            }
-        });
-    }
-
-    fn note_controller(&mut self, ui: &mut Ui, row: usize, voice_id: usize, project: &Project) {
-        let bg_colour = if (row / 4) % 2 == 1 {
-            Color32::from_rgba_unmultiplied(128, 128, 128, 128)
-        } else {
-            Color32::TRANSPARENT
-        };
-
-        let selected = if let Tool::Select(selection) = self.tool {
-            selection::widget_in_selection(&selection, row, voice_id)
-        } else {
-            false
-        };
-
-        ui.horizontal(|ui| {
-            let Some(note) = self
-                .local_state
-                .phrase
-                .voices
-                .get_mut(voice_id)
-                .and_then(|voice| voice.notes.get_mut(row))
-            else {
-                return;
-            };
-
-            let label = match note.semitone() {
-                Some(semitone) => format!(
-                    "{}{}{}",
-                    Note::letter_from_semitone(semitone),
-                    Note::octave_from_semitone(semitone),
-                    if Note::sharp_from_semitone(semitone) {
-                        "#"
-                    } else {
-                        ""
-                    }
-                ),
-                None => "-".to_string(),
-            };
-
-            let btn = ui.add_sized(
-                [40.0, 20.0],
-                if selected {
-                    Button::new(label).stroke(Stroke::new(2.0, Color32::LIGHT_BLUE))
-                } else {
-                    Button::new(label)
-                }
-                .fill(bg_colour)
-                .corner_radius(0.0)
-                .sense(Sense::click_and_drag()),
-            );
-
-            ui.menu_button(if note.has_effects() { "*+" } else { "+" }, |ui| {
-                self.local_state
-                    .effects_menu
-                    .update(ui, &mut note.effects, project);
-            });
-
-            match &mut self.tool {
-                Tool::Edit => Self::handle_note_editing(
-                    ui,
-                    note,
-                    &btn,
-                    &mut self.local_state.last_note_semitone,
-                ),
-                Tool::Select(selection) => {
-                    selection::handle_widget_selecting(ui, selection, &btn, row, voice_id);
-                    self.selection_context_menu(&btn, row, voice_id);
-                }
-            }
-        });
-    }
-
-    fn selection_context_menu(&mut self, response: &Response, row: usize, voice_id: usize) {
-        let Tool::Select(Some((coord1, coord2))) = self.tool else {
+        let Some(mut note) = Self::get_note(*note_idx, *voice_idx, state, project) else {
+            self.grid_state.fx_menu = FXMenuState::Closed;
             return;
         };
 
-        let phrase = &mut self.local_state.phrase;
+        let original_note = note.clone();
 
-        response.context_menu(|ui| {
-            if ui.button("Delete").clicked() {
-                ui.close();
-                Self::delete_selection(phrase, coord1, coord2);
-            }
+        let viewport_rect = ui.input(|i| i.viewport_rect());
+        let area_response = egui::Area::new("fx_dialog_bg".into())
+            .order(egui::Order::Foreground)
+            .interactable(true)
+            .fixed_pos([0.0, 0.0])
+            .show(ui.ctx(), |ui| {
+                ui.painter()
+                    .rect_filled(viewport_rect, 0.0, Color32::from_black_alpha(150));
+                ui.allocate_rect(viewport_rect, Sense::click());
+            })
+            .response;
 
-            if ui.button("Cut").clicked() {
-                ui.close();
-                Self::copy_selection(phrase, &mut self.clipboard, coord1, coord2);
-                Self::delete_selection(phrase, coord1, coord2);
-            }
-
-            if ui.button("Copy").clicked() {
-                ui.close();
-                Self::copy_selection(phrase, &mut self.clipboard, coord1, coord2);
-            }
-
-            if ui.button("Paste").clicked() {
-                ui.close();
-                Self::paste_selection(phrase, &self.clipboard, (voice_id, row));
-            }
-        });
-    }
-
-    fn handle_note_editing(
-        ui: &mut Ui,
-        note: &mut Note,
-        btn: &Response,
-        last_note_semitone: &mut u8,
-    ) {
-        // if can be edited
-        if !btn.hovered() {
+        if area_response.clicked() {
+            self.grid_state.fx_menu = FXMenuState::Closed;
             return;
         }
 
-        // note adding/deleting
-        if btn.secondary_clicked() {
-            match note.semitone() {
-                Some(semitone) => *last_note_semitone = semitone,
-                None => note.set_semitone(Some(*last_note_semitone)),
-            }
-        }
+        let mut open = true;
 
-        if btn.clicked()
-            && let Some(semitone) = note.semitone()
-        {
-            *last_note_semitone = semitone;
-            note.set_semitone(None);
-        }
-
-        let Some(semitone) = note.semitone() else {
-            return;
-        };
-
-        let amount = if ui.input(|i| i.modifiers.shift) {
-            12
-        } else {
-            1
-        };
-
-        if ui.input(|i| i.key_pressed(Key::A)) {
-            let new_semitone = semitone.saturating_sub(amount);
-            *last_note_semitone = new_semitone;
-            note.set_semitone(Some(new_semitone));
-        }
-
-        if ui.input(|i| i.key_pressed(Key::D)) {
-            let new_semitone = semitone.saturating_add(amount);
-            *last_note_semitone = new_semitone;
-            note.set_semitone(Some(new_semitone));
-        }
-    }
-
-    fn up_down_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        let Some(chain) = state
-            .viewed_chain
-            .and_then(|chain_id| project.chains().get(&chain_id))
-        else {
-            return;
-        };
-
-        let Some(current_row) = state.chain_selected_row else {
-            return;
-        };
-
-        if ui.small_button(regular::ARROW_UP).clicked() {
-            for i in (0..current_row).rev() {
-                let Some(phrase_id) = chain.rows.get(i).and_then(|row| row.phrase) else {
-                    continue;
-                };
-
-                state.chain_selected_row = Some(i);
-                state.viewed_phrase = Some(phrase_id);
-                break;
-            }
-        }
-
-        if ui.small_button(regular::ARROW_DOWN).clicked() {
-            for i in (current_row + 1)..chain.rows.len() {
-                let Some(phrase_id) = chain.rows.get(i).and_then(|row| row.phrase) else {
-                    continue;
-                };
-
-                state.chain_selected_row = Some(i);
-                state.viewed_phrase = Some(phrase_id);
-                break;
-            }
-        }
-    }
-
-    fn delete_selection(phrase: &mut Phrase, coord1: (usize, usize), coord2: (usize, usize)) {
-        let small_x = coord1.0.min(coord2.0);
-        let big_x = coord1.0.max(coord2.0);
-        let small_y = coord1.1.min(coord2.1);
-        let big_y = coord1.1.max(coord2.1);
-
-        phrase
-            .voices
-            .iter_mut()
-            .take(big_x + 1)
-            .skip(small_x)
-            .for_each(|voice| {
-                voice
-                    .notes
-                    .iter_mut()
-                    .take(big_y + 1)
-                    .skip(small_y)
-                    .for_each(|note| *note = Default::default())
-            });
-    }
-
-    fn copy_selection(
-        phrase: &mut Phrase,
-        clipboard: &mut Clipboard,
-        coord1: (usize, usize),
-        coord2: (usize, usize),
-    ) {
-        let small_x = coord1.0.min(coord2.0);
-        let big_x = coord1.0.max(coord2.0);
-        let small_y = coord1.1.min(coord2.1);
-        let big_y = coord1.1.max(coord2.1);
-
-        clipboard.clear();
-
-        phrase
-            .voices
-            .iter()
-            .take(big_x + 1)
-            .skip(small_x)
-            .for_each(|voice| {
-                clipboard.push(
-                    voice
-                        .notes
-                        .iter()
-                        .take(big_y + 1)
-                        .skip(small_y)
-                        .cloned()
-                        .collect(),
-                )
-            });
-    }
-
-    fn paste_selection(phrase: &mut Phrase, clipboard: &Clipboard, top_left: (usize, usize)) {
-        phrase
-            .voices
-            .iter_mut()
-            .skip(top_left.0)
-            .take(clipboard.len())
-            .zip(clipboard)
-            .for_each(|(proj_voice, clip_voice)| {
-                proj_voice
-                    .notes
-                    .iter_mut()
-                    .skip(top_left.1)
-                    .take(clip_voice.len())
-                    .zip(clip_voice)
-                    .for_each(|(proj_note, clip_note)| {
-                        *proj_note = clip_note.clone();
+        let diag_width = (viewport_rect.width() * 3.0) / 4.0;
+        let diag_height = (viewport_rect.height() * 3.0) / 4.0;
+        egui::Window::new("Effects")
+            .id(egui::Id::new("fx_dialog"))
+            .order(egui::Order::Tooltip)
+            .collapsible(false)
+            .resizable(false)
+            .fixed_size((diag_width, diag_height))
+            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                // table of effects that could be added
+                fx_menu.update(ui, &mut note.effects, project);
+                if note != original_note {
+                    project.push_cmd(PhraseCmd::UpdateNote {
+                        id: phrase_id,
+                        voice_index: *voice_idx,
+                        note_index: *note_idx,
+                        new_note: Note {
+                            effects: note.effects.clone(),
+                            ..original_note
+                        },
                     });
+                }
             });
+
+        if open == false || ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.grid_state.fx_menu = FXMenuState::Closed;
+        }
+    }
+
+    fn get_note(
+        note_idx: usize,
+        voice_idx: usize,
+        state: &AppUIState,
+        project: &Project,
+    ) -> Option<Note> {
+        let phrase_id = state.viewed_phrase?;
+        let phrase = project.phrases().get(&phrase_id)?;
+        Some(phrase.voices.get(voice_idx)?.notes.get(note_idx)?.clone())
     }
 }

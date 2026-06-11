@@ -18,10 +18,13 @@ mod track;
 
 pub trait Page {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
-    fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project);
+    fn draw_side_buttons(&mut self, _ui: &mut Ui, _state: &mut AppUIState, _project: &Project) {}
     fn handle_undo(&mut self, _project: &Project) {}
     fn handle_redo(&mut self, _project: &Project) {}
     fn play(&self, _state: &AppUIState, _project: ROProject) {}
+    fn play_global(&self, state: &AppUIState, project: ROProject) {
+        self.play(state, project);
+    }
     fn heading(&self, _state: &AppUIState) -> String;
 }
 

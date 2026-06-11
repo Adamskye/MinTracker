@@ -35,8 +35,8 @@ pub enum TrackCellData {
     },
 }
 
-impl CellData<TrackUIGridState> for TrackCellData {
-    fn color(&self) -> Color32 {
+impl CellData<GridState> for TrackCellData {
+    fn color(&self, _: &GridState) -> Color32 {
         Color32::TRANSPARENT
     }
 
@@ -52,24 +52,27 @@ impl CellData<TrackUIGridState> for TrackCellData {
         }
     }
 
-    fn inner_widget(
-        &self,
-        ui: &mut Ui,
-        grid_state: &mut TrackUIGridState,
-        _state: &mut AppUIState,
-        _project: &Project,
-    ) {
-        if let TrackCellData::ChainButton { .. } = self
-            && self.is_playing(grid_state)
-        {
-            ui.horizontal_centered(|ui| {
-                ui.label(regular::CARET_RIGHT);
-            });
-        }
+    fn inner_widget(&self, ui: &mut Ui, _: &mut GridState, _: &mut AppUIState, _: &Project) {
+        ui.horizontal_centered(|ui| {
+            ui.label(regular::CARET_RIGHT);
+        });
     }
 
-    fn has_inner_widget(&self, grid_state: &mut TrackUIGridState) -> bool {
-        self.is_playing(grid_state)
+    fn has_inner_widget(&self, grid_state: &mut GridState) -> bool {
+        let this = &self;
+        match this {
+            TrackCellData::ChainButton {
+                track_index,
+                chain_offset,
+                ..
+            } => grid_state
+                .playing
+                .iter()
+                .flatten()
+                .find(|pos| pos.track_idx == *track_index)
+                .is_some_and(|position| position.chain_offset == *chain_offset),
+            _ => false,
+        }
     }
 
     fn has_context_menu(&self) -> bool {
@@ -79,7 +82,7 @@ impl CellData<TrackUIGridState> for TrackCellData {
     fn context_menu(
         &self,
         ui: &mut Ui,
-        _grid_state: &mut TrackUIGridState,
+        _grid_state: &mut GridState,
         _state: &mut AppUIState,
         project: &Project,
     ) {
@@ -96,7 +99,7 @@ impl CellData<TrackUIGridState> for TrackCellData {
 
     fn trigger_action(
         &self,
-        grid_state: &mut TrackUIGridState,
+        grid_state: &mut GridState,
         ui_state: &mut AppUIState,
         project: &Project,
     ) {
@@ -129,12 +132,7 @@ impl CellData<TrackUIGridState> for TrackCellData {
         }
     }
 
-    fn on_click(
-        &self,
-        grid_state: &mut TrackUIGridState,
-        _state: &mut AppUIState,
-        _project: &Project,
-    ) {
+    fn on_click(&self, grid_state: &mut GridState, _state: &mut AppUIState, _project: &Project) {
         // open track settings
         if let TrackCellData::TrackOptionsButton { track_index } = self {
             grid_state.track_opened_settings =
@@ -146,14 +144,14 @@ impl CellData<TrackUIGridState> for TrackCellData {
         }
     }
 
-    fn selectable(&self) -> bool {
+    fn multiselectable(&self) -> bool {
         matches!(self, TrackCellData::ChainButton { .. })
     }
 
     fn on_keyboard_input(
         &self,
         input: &egui::InputState,
-        _grid_state: &mut TrackUIGridState,
+        _grid_state: &mut GridState,
         _ui_state: &mut AppUIState,
         project: &Project,
     ) {
@@ -205,21 +203,6 @@ impl CellData<TrackUIGridState> for TrackCellData {
 }
 
 impl TrackCellData {
-    fn is_playing(&self, grid_state: &mut TrackUIGridState) -> bool {
-        match self {
-            TrackCellData::ChainButton {
-                track_index,
-                chain_offset,
-                ..
-            } => grid_state
-                .playing
-                .get(*track_index)
-                .and_then(|opt| *opt)
-                .is_some_and(|position| position.chain_offset == *chain_offset),
-            _ => false,
-        }
-    }
-
     fn context_menu_chain(
         track_index: usize,
         chain_offset: usize,
@@ -240,6 +223,7 @@ impl TrackCellData {
                 new_chain_id: Some(id),
             });
         }
+
         if let Some(chain_id) = chain_id_opt {
             if ui.button("Delete Chain").clicked() {
                 ui.close();
@@ -275,16 +259,16 @@ impl TrackCellData {
 }
 
 #[derive(Default)]
-struct TrackUIGridState {
+struct GridState {
     track_opened_settings: Option<usize>,
     playing: Vec<Option<ProjectLocation>>,
 }
 
 pub struct TrackUI {
     clipboard: Clipboard,
-    grid_state: TrackUIGridState,
+    grid_state: GridState,
 
-    cells_state: CellGrid<TrackCellData, TrackUIGridState>,
+    cells_state: CellGrid<TrackCellData, GridState>,
     grid_update_ts: Option<ProjectTimestamp>,
 }
 
@@ -292,7 +276,7 @@ impl Default for TrackUI {
     fn default() -> Self {
         Self {
             clipboard: Default::default(),
-            grid_state: TrackUIGridState::default(),
+            grid_state: GridState::default(),
             cells_state: CellGrid::new(CHAINS_PER_TRACK, 0),
             grid_update_ts: None,
         }
@@ -310,8 +294,6 @@ impl Page for TrackUI {
             ui.allocate_space(ui.available_size());
         });
     }
-
-    fn draw_side_buttons(&mut self, _ui: &mut Ui, _state: &mut AppUIState, _project: &Project) {}
 
     fn play(&self, state: &AppUIState, project: ROProject) {
         let chain_offset = self

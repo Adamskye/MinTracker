@@ -28,37 +28,35 @@ pub struct PreferencesUI {
 
 impl Page for PreferencesUI {
     fn update(&mut self, ui: &mut Ui, ui_state: &mut AppUIState, _project: &Project) {
-        subsecond::call(|| {
-            if self.recording_key.is_some() {
-                self.recording_keybind(ui, ui_state);
-                return;
-            }
+        if self.recording_key.is_some() {
+            self.recording_keybind(ui, ui_state);
+            return;
+        }
 
-            // use selectable labels to simulate tabs
-            let tabs = [Tab::General, Tab::Keybinds, Tab::Styling];
-            ui.horizontal(|ui| {
-                for tab in tabs {
-                    if ui
-                        .selectable_label(self.current_tab == tab, format!("{tab:?}"))
-                        .clicked()
-                    {
-                        self.current_tab = tab
-                    }
+        // use selectable labels to simulate tabs
+        let tabs = [Tab::General, Tab::Keybinds, Tab::Styling];
+        ui.horizontal(|ui| {
+            for tab in tabs {
+                if ui
+                    .selectable_label(self.current_tab == tab, format!("{tab:?}"))
+                    .clicked()
+                {
+                    self.current_tab = tab
                 }
-            });
+            }
+        });
 
-            ui.separator();
+        ui.separator();
 
-            egui::ScrollArea::both().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| match self.current_tab {
-                        Tab::General => self.general_tab(ui, ui_state),
-                        Tab::Keybinds => self.keybinds_tab(ui, ui_state),
-                        Tab::Styling => self.style_tab(ui, ui_state),
-                    });
+        egui::ScrollArea::both().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| match self.current_tab {
+                    Tab::General => self.general_tab(ui, ui_state),
+                    Tab::Keybinds => self.keybinds_tab(ui, ui_state),
+                    Tab::Styling => self.style_tab(ui, ui_state),
                 });
-                ui.allocate_space(ui.available_size());
             });
+            ui.allocate_space(ui.available_size());
         });
     }
 

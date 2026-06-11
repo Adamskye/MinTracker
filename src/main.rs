@@ -31,7 +31,6 @@ mod keybinds;
 mod page;
 mod preferences;
 mod project;
-mod selection;
 mod synth;
 mod widget;
 
@@ -97,79 +96,77 @@ impl Default for MinTracker {
 
 impl App for MinTracker {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        subsecond::call(|| {
-            self.handle_global_keybinds(ctx);
-            self.update_project_events();
+        self.handle_global_keybinds(ctx);
+        self.update_project_events();
 
-            if self.ui_state.player.is_playing() {
-                ctx.request_repaint()
-            }
+        if self.ui_state.player.is_playing() {
+            ctx.request_repaint()
+        }
 
-            Self::set_style(ctx);
-            self.ui_state.preferences().style.apply(ctx);
+        Self::set_style(ctx);
+        self.ui_state.preferences().style.apply(ctx);
 
-            let window_fill = to_colour32(self.ui_state.preferences().style.colours.window_bg);
-            let sidepanel_fill = window_fill.linear_multiply(1.3);
-            let toppanel_fill = window_fill.linear_multiply(1.15);
+        let window_fill = to_colour32(self.ui_state.preferences().style.colours.window_bg);
+        let sidepanel_fill = window_fill.linear_multiply(1.3);
+        let toppanel_fill = window_fill.linear_multiply(1.15);
 
-            let window_margin = self.ui_state.preferences().style.window_margin;
+        let window_margin = self.ui_state.preferences().style.window_margin;
 
-            egui::SidePanel::left("side_panel")
-                .resizable(false)
-                .frame(
-                    Frame::default()
-                        .inner_margin(window_margin)
-                        .fill(sidepanel_fill),
-                )
-                .show_separator_line(true)
-                .show(ctx, |ui| {
-                    self.sidepanel(ui);
+        egui::SidePanel::left("side_panel")
+            .resizable(false)
+            .frame(
+                Frame::default()
+                    .inner_margin(window_margin)
+                    .fill(sidepanel_fill),
+            )
+            .show_separator_line(true)
+            .show(ctx, |ui| {
+                self.sidepanel(ui);
+            });
+
+        egui::TopBottomPanel::top("top_panel")
+            .resizable(false)
+            .frame(
+                Frame::default()
+                    .inner_margin(window_margin)
+                    .fill(toppanel_fill),
+            )
+            .show_separator_line(true)
+            .show(ctx, |ui| {
+                ui.horizontal_centered(|ui| {
+                    let page = self.pages.page_mut(self.ui_state.current_page);
+                    ui.heading(RichText::new(page.heading(&self.ui_state)).bold_ex());
+                });
+            });
+
+        egui::CentralPanel::default()
+            .frame(
+                Frame::default()
+                    .inner_margin(window_margin)
+                    .fill(window_fill),
+            )
+            .show(ctx, |ui| {
+                // main area
+                ui.vertical(|ui| {
+                    self.update_page(ui);
+
+                    ui.allocate_space(ui.available_size());
                 });
 
-            egui::TopBottomPanel::top("top_panel")
-                .resizable(false)
-                .frame(
-                    Frame::default()
-                        .inner_margin(window_margin)
-                        .fill(toppanel_fill),
-                )
-                .show_separator_line(true)
-                .show(ctx, |ui| {
-                    ui.horizontal_centered(|ui| {
-                        let page = self.pages.page_mut(self.ui_state.current_page);
-                        ui.heading(RichText::new(page.heading(&self.ui_state)).bold_ex());
-                    });
-                });
+                self.ui_state.show_toasts(ui);
+            });
 
-            egui::CentralPanel::default()
-                .frame(
-                    Frame::default()
-                        .inner_margin(window_margin)
-                        .fill(window_fill),
-                )
-                .show(ctx, |ui| {
-                    // main area
-                    ui.vertical(|ui| {
-                        self.update_page(ui);
+        if ctx.input(|i| i.viewport().close_requested())
+            && self.ui_state.project_dirty
+            && !self.force_close
+        {
+            self.show_exit_dialog = true;
+            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+        }
 
-                        ui.allocate_space(ui.available_size());
-                    });
-
-                    self.ui_state.show_toasts(ui);
-                });
-
-            if ctx.input(|i| i.viewport().close_requested())
-                && self.ui_state.project_dirty
-                && !self.force_close
-            {
-                self.show_exit_dialog = true;
-                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-            }
-
-            if self.show_exit_dialog {
-                self.exit_dialog(ctx);
-            }
-        });
+        if self.show_exit_dialog {
+            self.exit_dialog(ctx);
+        }
     }
 }
 
@@ -195,7 +192,7 @@ impl MinTracker {
             if self.ui_state.player.is_playing() {
                 self.ui_state.player.send_command(PlayerCmd::Stop);
             } else {
-                self.play_viewed();
+                self.play_viewed(ctx.input(|i| i.modifiers.shift));
             }
         }
 
@@ -404,7 +401,7 @@ impl MinTracker {
                 if player_active {
                     self.ui_state.player.send_command(PlayerCmd::Resume);
                 } else {
-                    self.play_viewed();
+                    self.play_viewed(ui.input(|i| i.modifiers.shift));
                 }
             }
 
@@ -546,8 +543,11 @@ impl MinTracker {
         });
     }
 
-    fn play_viewed(&self) {
+    fn play_viewed(&self, global: bool) {
         let page = self.pages.page(self.ui_state.current_page);
-        page.play(&self.ui_state, ROProject::new(self.project.clone()));
+        match global {
+            true => page.play_global(&self.ui_state, ROProject::new(self.project.clone())),
+            false => page.play(&self.ui_state, ROProject::new(self.project.clone())),
+        }
     }
 }

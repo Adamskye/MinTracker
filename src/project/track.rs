@@ -9,7 +9,7 @@ pub struct TrackSettings {
     pub pan: f32,
     pub muted: bool,
     #[serde(default)]
-    pub transpose_semitones: f32,
+    pub transpose_semitones: i32,
 }
 
 impl Default for TrackSettings {
@@ -19,7 +19,7 @@ impl Default for TrackSettings {
             volume: 1.0,
             pan: 0.0,
             muted: false,
-            transpose_semitones: 0.0,
+            transpose_semitones: 0,
         }
     }
 }

@@ -2,14 +2,12 @@ use crate::{helpers::to_colour32, keybinds::Keybinds};
 use egui::{Context, FontFamily, Stroke, TextStyle};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Preferences {
     pub general: General,
     pub keybinds: Keybinds,
     pub style: Style,
 }
-
 
 impl Preferences {
     pub fn load() -> Self {
@@ -122,16 +120,14 @@ impl Style {
     pub fn apply(&self, ctx: &Context) {
         // general styling
         ctx.all_styles_mut(|style| {
-            subsecond::call(|| {
-                let corner_radius = if self.rounded_corners { 2.0 } else { 0.0 }.into();
-                style.visuals.widgets.noninteractive.corner_radius = corner_radius;
-                style.visuals.widgets.inactive.corner_radius = corner_radius;
-                style.visuals.widgets.hovered.corner_radius = corner_radius;
-                style.visuals.widgets.active.corner_radius = corner_radius;
-                style.visuals.widgets.open.corner_radius = corner_radius;
-                style.visuals.window_corner_radius = corner_radius;
-                style.visuals.menu_corner_radius = corner_radius;
-            });
+            let corner_radius = if self.rounded_corners { 2.0 } else { 0.0 }.into();
+            style.visuals.widgets.noninteractive.corner_radius = corner_radius;
+            style.visuals.widgets.inactive.corner_radius = corner_radius;
+            style.visuals.widgets.hovered.corner_radius = corner_radius;
+            style.visuals.widgets.active.corner_radius = corner_radius;
+            style.visuals.widgets.open.corner_radius = corner_radius;
+            style.visuals.window_corner_radius = corner_radius;
+            style.visuals.menu_corner_radius = corner_radius;
         });
 
         // colours

@@ -1,4 +1,6 @@
 use eframe::egui::{Button, DragValue, Ui};
+use egui::{Align, Color32, Layout, ScrollArea, Stroke};
+use egui_phosphor::regular::{PLUS, SLIDERS_HORIZONTAL, TRASH};
 
 use crate::{
     project::{
@@ -11,7 +13,8 @@ use crate::{
 #[derive(Clone, PartialEq, Default)]
 pub enum EffectMenuSelected {
     #[default]
-    None,
+    AddEffect,
+    Presets,
     Vibrato,
     Kill,
     SoftKill,
@@ -24,46 +27,67 @@ pub enum EffectMenuSelected {
 #[derive(Clone, PartialEq, Default)]
 pub struct EffectsMenu {
     selected: EffectMenuSelected,
-
     preset_textbox_content: String,
 }
 
 impl EffectsMenu {
     pub fn update(&mut self, ui: &mut Ui, effects: &mut NoteEffects, project: &Project) {
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(80.0);
+        ui.with_layout(
+            Layout::left_to_right(Align::Min).with_main_justify(true),
+            |ui| {
+                // left
+                ui.vertical(|ui| {
+                    ui.set_width(120.0);
+                    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                        ui.horizontal(|ui| {
+                            use EffectMenuSelected as ems;
+                            ui.selectable_label(self.selected == ems::AddEffect, PLUS)
+                                .on_hover_text("Add Effects")
+                                .clicked()
+                                .then(|| self.selected = ems::AddEffect);
 
-                self.effect_presets(ui, effects, project);
-                self.effect_adder(ui, effects);
+                            ui.selectable_label(self.selected == ems::Presets, SLIDERS_HORIZONTAL)
+                                .on_hover_text("Presets")
+                                .clicked()
+                                .then(|| self.selected = ems::Presets);
+                        });
 
-                ui.separator();
-
-                self.effect_selector(ui, effects);
-
-                ui.separator();
-
-                ui.text_edit_singleline(&mut self.preset_textbox_content);
-                if ui
-                    .add_enabled(
-                        !self.preset_textbox_content.is_empty(),
-                        Button::new("Add Preset"),
-                    )
-                    .clicked()
-                {
-                    let name = self.preset_textbox_content.clone();
-                    let effects = effects.clone();
-                    let id = Project::get_unique_key(project.effect_presets());
-                    project.push_cmd(EffectPresetCmd::Update {
-                        id,
-                        new_preset: Some(Box::new(EffectPreset { name, effects })),
+                        // show list of effects
+                        self.effect_selector(ui, effects);
                     });
-                    self.preset_textbox_content = "".to_string();
-                }
-            });
 
-            self.show_page(ui, effects);
-        });
+                    // adding a preset
+                    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                        if ui
+                            .add_enabled(
+                                !self.preset_textbox_content.is_empty(),
+                                Button::new("Add Preset"),
+                            )
+                            .clicked()
+                        {
+                            let id = Project::get_unique_key(project.effect_presets());
+                            project.push_cmd(EffectPresetCmd::Update {
+                                id,
+                                new_preset: Some(Box::new(EffectPreset {
+                                    name: self.preset_textbox_content.clone(),
+                                    effects: effects.clone(),
+                                })),
+                            });
+                        }
+
+                        ui.text_edit_singleline(&mut self.preset_textbox_content)
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                // right
+                ScrollArea::vertical().show(ui, |ui| {
+                    self.show_page(ui, effects, project);
+                    ui.allocate_space(ui.available_size());
+                });
+            },
+        );
     }
 
     fn effect_selector(&mut self, ui: &mut Ui, effects: &mut NoteEffects) {
@@ -89,55 +113,24 @@ impl EffectsMenu {
         effect_option!(effects.pan, ems::Pan, "Pan");
     }
 
-    fn effect_presets(&mut self, ui: &mut Ui, effects: &mut NoteEffects, project: &Project) {
-        if project.effect_presets().is_empty() {
-            return;
-        }
-
-        let mut to_delete_key = None;
-
-        let _ = ui.menu_button("Preset", |ui| {
-            project.effect_presets().iter().for_each(|(key, preset)| {
-                ui.horizontal_centered(|ui| {
-                    if ui.small_button("❌").clicked() {
-                        to_delete_key = Some(key);
-                    }
-                    if ui.button(format!("{} - {}", key, preset.name)).clicked() {
-                        effects.add_from_other(&preset.effects);
-                    }
-                });
-            });
-        });
-
-        if let Some(key) = to_delete_key {
-            project.push_cmd(EffectPresetCmd::Update {
-                id: *key,
-                new_preset: None,
-            });
-        }
-    }
-
     fn effect_adder(&mut self, ui: &mut Ui, effects: &mut NoteEffects) {
         macro_rules! add_effect_option {
-            ($ui:ident, $effect_var:expr,$name:literal) => {
-                if $effect_var.is_none() && $ui.button($name).clicked() {
+            ($effect_var:expr,$name:literal) => {
+                if $effect_var.is_none() && ui.button($name).clicked() {
                     $effect_var = Some(Default::default());
                 }
             };
         }
-
-        let _ = ui.menu_button("Add Effect", |ui| {
-            add_effect_option!(ui, effects.vibrato, "Vibrato");
-            add_effect_option!(ui, effects.kill, "Kill");
-            add_effect_option!(ui, effects.soft_kill, "Soft Kill");
-            add_effect_option!(ui, effects.pitch_bend, "Pitch Bend");
-            add_effect_option!(ui, effects.slide, "Slide");
-            add_effect_option!(ui, effects.envelope, "Envelope");
-            add_effect_option!(ui, effects.pan, "Pan");
-        });
+        add_effect_option!(effects.vibrato, "Vibrato");
+        add_effect_option!(effects.kill, "Kill");
+        add_effect_option!(effects.soft_kill, "Soft Kill");
+        add_effect_option!(effects.pitch_bend, "Pitch Bend");
+        add_effect_option!(effects.slide, "Slide");
+        add_effect_option!(effects.envelope, "Envelope");
+        add_effect_option!(effects.pan, "Pan");
     }
 
-    fn show_page(&mut self, ui: &mut Ui, effects: &mut NoteEffects) {
+    fn show_page(&mut self, ui: &mut Ui, effects: &mut NoteEffects, project: &Project) {
         macro_rules! show_effects_page {
             ($ui:expr,$effect:expr, $self:ident, $page_func:ident) => {
                 if let Some(x) = &mut $effect {
@@ -151,7 +144,13 @@ impl EffectsMenu {
         ui.vertical(|ui| {
             use EffectMenuSelected as ems;
             match self.selected {
-                ems::None => return,
+                ems::AddEffect => {
+                    self.effect_adder(ui, effects);
+                    return;
+                }
+                ems::Presets => {
+                    self.preset_selector(ui, effects, project);
+                }
                 ems::Vibrato => {
                     show_effects_page!(ui, effects.vibrato, self, vibrato_page);
                 }
@@ -181,10 +180,28 @@ impl EffectsMenu {
         });
     }
 
+    fn preset_selector(&mut self, ui: &mut Ui, effects: &mut NoteEffects, project: &Project) {
+        for (id, preset) in project.effect_presets() {
+            ui.horizontal(|ui| {
+                if ui.button(format!("{} - {}", id, preset.name)).clicked() {
+                    *effects = preset.effects.clone();
+                }
+
+                if ui.button(TRASH).clicked() {
+                    project.push_cmd(EffectPresetCmd::Update {
+                        id: *id,
+                        new_preset: None,
+                    });
+                }
+            });
+        }
+    }
+
     fn remove_selection(&mut self, effects: &mut NoteEffects) {
         use EffectMenuSelected as ems;
         match self.selected {
-            ems::None => return,
+            ems::AddEffect => return,
+            ems::Presets => return,
             ems::Vibrato => effects.vibrato = None,
             ems::Kill => effects.kill = None,
             ems::SoftKill => effects.soft_kill = None,
@@ -193,7 +210,7 @@ impl EffectsMenu {
             ems::Envelope => effects.envelope = None,
             ems::Pan => effects.pan = None,
         };
-        self.selected = EffectMenuSelected::None;
+        self.selected = EffectMenuSelected::AddEffect;
     }
 
     fn vibrato_page(&mut self, ui: &mut Ui, vibrato_effect: &mut VibratoEffect) {
