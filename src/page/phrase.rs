@@ -6,6 +6,7 @@ use egui_phosphor::regular::{self, FUNCTION, MINUS};
 use crate::{
     app_ui_state::AppUIState,
     effects_menu::EffectsMenu,
+    helpers,
     page::Page,
     project::{
         Note, NoteEffects, Phrase, PhraseCmd, Project, ProjectLocation, ROWS_PER_PHRASE, Semitone,
@@ -56,6 +57,28 @@ impl CellData<GridState> for CellState {
                 Some(note.semitone.map(|s| s.to_string()).unwrap_or(MINUS.into()))
             }
             CellState::AddEffect { .. } => Some(FUNCTION.into()),
+        }
+    }
+
+    fn text_color(&self, project: &Project, state: &mut AppUIState) -> Color32 {
+        let default = helpers::to_colour32(state.preferences().style.colours.text);
+        match self {
+            CellState::AddEffect { row, voice } => {
+                let Some(viewed_phrase) = state.viewed_phrase else {
+                    return default;
+                };
+
+                // highlight if an effect has been added or not
+                project
+                    .phrases()
+                    .get(&viewed_phrase)
+                    .and_then(|phrase| phrase.voices.get(*voice))
+                    .and_then(|v| v.notes.get(*row))
+                    .filter(|n| !n.effects.is_empty())
+                    .map(|_| helpers::to_colour32(state.preferences().style.colours.highlighted))
+                    .unwrap_or(default)
+            }
+            _ => default,
         }
     }
 

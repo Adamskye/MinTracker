@@ -1,8 +1,24 @@
+use std::{
+    collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
+    mem::Discriminant,
+};
+
 use serde::{Deserialize, Serialize};
 
 use crate::project::Semitone;
 
 use super::ADSREnvelope;
+
+macro_rules! add_from_other {
+    ($self:ident, $other:ident, $( $effect:ident ),*) => {
+        $(
+            if $other.$effect.is_some() {
+                $self.$effect = $other.$effect.clone();
+            }
+        )*
+    };
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NoteEffects {
@@ -24,26 +40,15 @@ pub struct NoteEffects {
 }
 
 impl NoteEffects {
-    pub fn is_empty(&self) -> bool {
-        *self == Self::default()
-    }
-
     /// adds effects from another NoteEffects struct
     pub fn add_from_other(&mut self, other: &NoteEffects) {
-        macro_rules! add_effect {
-            ($effect:ident) => {
-                if other.$effect.is_some() {
-                    self.$effect = other.$effect.clone();
-                }
-            };
-        }
-        add_effect!(vibrato);
-        add_effect!(kill);
-        add_effect!(pitch_bend);
-        add_effect!(slide);
-        add_effect!(envelope);
-        add_effect!(pan);
-        add_effect!(soft_kill);
+        add_from_other!(
+            self, other, vibrato, kill, pitch_bend, slide, envelope, pan, soft_kill
+        );
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
     }
 }
 

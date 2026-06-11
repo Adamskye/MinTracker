@@ -1,7 +1,11 @@
 use eframe::egui::{self, Align, Color32, Id, Rect, Sense, Stroke, Ui, UiBuilder};
 use egui::FontId;
 
-use crate::{AppUIState, helpers::to_colour32, project::Project};
+use crate::{
+    AppUIState,
+    helpers::{self, to_colour32},
+    project::Project,
+};
 
 #[derive(Clone, Debug)]
 pub struct GridSelection {
@@ -127,6 +131,10 @@ where
 pub trait CellData<G> {
     /// String to be displayed within cell.
     fn text(&self) -> Option<String>;
+
+    fn text_color(&self, _project: &Project, state: &mut AppUIState) -> Color32 {
+        helpers::to_colour32(state.preferences().style.colours.text)
+    }
 
     /// Inner widget of cell. Only called if has_inner_widget returns true.
     fn inner_widget(
@@ -382,7 +390,7 @@ pub fn cells<T, G>(
                     egui::Align2::CENTER_CENTER,
                     text,
                     FontId::default(),
-                    Color32::WHITE,
+                    cell_data.text_color(project, state),
                 );
             }
 

@@ -91,9 +91,10 @@ impl EffectsMenu {
     }
 
     fn effect_selector(&mut self, ui: &mut Ui, effects: &mut NoteEffects) {
+        use EffectMenuSelected as ems;
         macro_rules! effect_option {
-            ($effect_var:expr,$enum_var:expr,$text:expr) => {
-                if $effect_var.is_some()
+            ($effect_var:ident,$enum_var:expr,$text:expr) => {
+                if effects.$effect_var.is_some()
                     && ui
                         .selectable_label(self.selected == $enum_var, $text)
                         .clicked()
@@ -102,15 +103,13 @@ impl EffectsMenu {
                 }
             };
         }
-
-        use EffectMenuSelected as ems;
-        effect_option!(effects.vibrato, ems::Vibrato, "Vibrato");
-        effect_option!(effects.kill, ems::Kill, "Kill");
-        effect_option!(effects.soft_kill, ems::SoftKill, "Soft Kill");
-        effect_option!(effects.pitch_bend, ems::PitchBend, "Pitch Bend");
-        effect_option!(effects.slide, ems::Slide, "Slide");
-        effect_option!(effects.envelope, ems::Envelope, "Envelope");
-        effect_option!(effects.pan, ems::Pan, "Pan");
+        effect_option!(vibrato, ems::Vibrato, "Vibrato");
+        effect_option!(kill, ems::Kill, "Kill");
+        effect_option!(soft_kill, ems::SoftKill, "Soft Kill");
+        effect_option!(pitch_bend, ems::PitchBend, "Pitch Bend");
+        effect_option!(slide, ems::Slide, "Slide");
+        effect_option!(envelope, ems::Envelope, "Envelope");
+        effect_option!(pan, ems::Pan, "Pan");
     }
 
     fn effect_adder(&mut self, ui: &mut Ui, effects: &mut NoteEffects) {
@@ -131,17 +130,17 @@ impl EffectsMenu {
     }
 
     fn show_page(&mut self, ui: &mut Ui, effects: &mut NoteEffects, project: &Project) {
-        macro_rules! show_effects_page {
-            ($ui:expr,$effect:expr, $self:ident, $page_func:ident) => {
-                if let Some(x) = &mut $effect {
-                    $self.$page_func($ui, x);
-                } else {
-                    return;
-                }
-            };
-        }
-
         ui.vertical(|ui| {
+            macro_rules! page {
+                ($effect:ident, $page_func:ident) => {
+                    if let Some(x) = &mut effects.$effect {
+                        self.$page_func(ui, x);
+                    } else {
+                        return;
+                    }
+                };
+            }
+
             use EffectMenuSelected as ems;
             match self.selected {
                 ems::AddEffect => {
@@ -151,27 +150,13 @@ impl EffectsMenu {
                 ems::Presets => {
                     self.preset_selector(ui, effects, project);
                 }
-                ems::Vibrato => {
-                    show_effects_page!(ui, effects.vibrato, self, vibrato_page);
-                }
-                ems::Kill => {
-                    show_effects_page!(ui, effects.kill, self, kill_page);
-                }
-                ems::SoftKill => {
-                    show_effects_page!(ui, effects.soft_kill, self, soft_kill_page);
-                }
-                ems::PitchBend => {
-                    show_effects_page!(ui, effects.pitch_bend, self, pitch_bend_page);
-                }
-                ems::Slide => {
-                    show_effects_page!(ui, effects.slide, self, slide_page);
-                }
-                ems::Envelope => {
-                    show_effects_page!(ui, effects.envelope, self, envelope_page);
-                }
-                ems::Pan => {
-                    show_effects_page!(ui, effects.pan, self, pan_page);
-                }
+                ems::Vibrato => page!(vibrato, vibrato_page),
+                ems::Kill => page!(kill, kill_page),
+                ems::SoftKill => page!(soft_kill, soft_kill_page),
+                ems::PitchBend => page!(pitch_bend, pitch_bend_page),
+                ems::Slide => page!(slide, slide_page),
+                ems::Envelope => page!(envelope, envelope_page),
+                ems::Pan => page!(pan, pan_page),
             };
 
             if ui.button("Remove").clicked() {
