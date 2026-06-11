@@ -144,6 +144,11 @@ impl CellData<GridState> for CellState {
         state: &mut AppUIState,
         project: &Project,
     ) -> Option<CellGridEvent> {
+        let evt = self.keyboard_input_move_between_phrases(input, state, project);
+        if evt.is_some() {
+            return evt;
+        }
+
         let Self::Note { note, row, voice } = self else {
             return None;
         };
@@ -152,42 +157,19 @@ impl CellData<GridState> for CellState {
         // get the currently viewed phrase
         let phrase_id = state.viewed_phrase?;
 
-        let mut changed = false;
         if input.key_pressed(state.preferences().keybinds.increase) {
             note.semitone = note.semitone.map(|s| s.transposed_by(1));
             if note.semitone.is_none() {
                 note.semitone = Some(grid_state.last_semitone);
             }
-            changed = true;
         } else if input.key_pressed(state.preferences().keybinds.decrease) {
             note.semitone = note.semitone.map(|s| s.transposed_by(-1));
             if note.semitone.is_none() {
                 note.semitone = Some(grid_state.last_semitone);
             }
-            changed = true;
         } else if input.key_pressed(state.preferences().keybinds.delete) {
             note.semitone = None;
-            changed = true;
-        } else if input.key_pressed(state.preferences().keybinds.down)
-            && *row >= ROWS_PER_PHRASE - 1
-        {
-            return if go_to_next(state, project) {
-                Some(CellGridEvent::SetHighlightedPosition(0, *voice))
-            } else {
-                None
-            };
-        } else if input.key_pressed(state.preferences().keybinds.up) && *row == 0 {
-            return if go_to_previous(state, project) {
-                Some(CellGridEvent::SetHighlightedPosition(
-                    ROWS_PER_PHRASE - 1,
-                    *voice,
-                ))
-            } else {
-                None
-            };
-        }
-
-        if !changed {
+        } else {
             return None;
         }
 
@@ -211,6 +193,40 @@ impl CellData<GridState> for CellState {
 
     fn multiselectable(&self) -> bool {
         matches!(self, CellState::Note { .. })
+    }
+}
+
+impl CellState {
+    fn keyboard_input_move_between_phrases(
+        &self,
+        input: &egui::InputState,
+        state: &mut AppUIState,
+        project: &Project,
+    ) -> Option<CellGridEvent> {
+        let (row, voice) = match self {
+            CellState::Note { row, voice, .. } => (row, voice * 2),
+            CellState::AddEffect { row, voice } => (row, (voice * 2) + 1),
+            _ => return None,
+        };
+
+        if input.key_pressed(state.preferences().keybinds.down) && *row >= ROWS_PER_PHRASE - 1 {
+            return if go_to_next(state, project) {
+                Some(CellGridEvent::SetHighlightedPosition(0, voice))
+            } else {
+                None
+            };
+        } else if input.key_pressed(state.preferences().keybinds.up) && *row == 0 {
+            return if go_to_previous(state, project) {
+                Some(CellGridEvent::SetHighlightedPosition(
+                    ROWS_PER_PHRASE - 1,
+                    voice,
+                ))
+            } else {
+                None
+            };
+        } else {
+            None
+        }
     }
 }
 

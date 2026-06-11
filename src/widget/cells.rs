@@ -1,5 +1,5 @@
 use eframe::egui::{self, Align, Color32, Id, Rect, Sense, Stroke, Ui, UiBuilder};
-use egui::FontId;
+use egui::{FontId, Vec2};
 
 use crate::{
     AppUIState,
@@ -208,7 +208,7 @@ pub trait CellData<G> {
     }
 }
 
-fn rect_from_cell_pos(row: usize, column: usize, cell_size: egui::Vec2, grid_rect: Rect) -> Rect {
+fn rect_from_cell_pos(row: usize, column: usize, cell_size: Vec2, grid_rect: Rect) -> Rect {
     Rect::from_min_size(
         egui::pos2(column as f32 * cell_size.x, row as f32 * cell_size.y) + grid_rect.min.to_vec2(),
         cell_size,
@@ -264,9 +264,214 @@ pub fn cells<T, G>(
         env.set_highlighted_row(env.num_rows().saturating_sub(1));
     }
 
-    let mut should_scroll_to_highlighted = false;
+    let should_scroll_to_highlighted =
+        handle_global_keyboard_input(ui, env, grid_state, state, project);
 
+    for row in 0..env.num_rows() {
+        for column in 0..env.num_columns() {
+            handle_cell(
+                ui,
+                env,
+                grid_state,
+                state,
+                project,
+                cell_size,
+                grid_rect,
+                should_scroll_to_highlighted,
+                row,
+                column,
+            );
+        }
+    }
+}
+
+fn handle_cell<T, G>(
+    ui: &mut Ui,
+    env: &mut CellGrid<T, G>,
+    grid_state: &mut G,
+    state: &mut AppUIState,
+    project: &Project,
+    cell_size: Vec2,
+    grid_rect: Rect,
+    scroll_to: bool,
+    row: usize,
+    column: usize,
+) where
+    T: Default + Clone + CellData<G>,
+{
+    let cell_rect = rect_from_cell_pos(row, column, cell_size, grid_rect);
+    let cell_is_highlighted = row == env.highlighted_row() && column == env.highlighted_col();
+
+    let cell_is_selected = env.selection.as_ref().is_some_and(|selection| {
+        let (start_row, start_col) = selection.first;
+        let (end_row, end_col) = selection.last;
+
+        row >= start_row.min(end_row)
+            && row <= start_row.max(end_row)
+            && column >= start_col.min(end_col)
+            && column <= start_col.max(end_col)
+    });
+
+    if !ui.is_rect_visible(cell_rect) {
+        return;
+    }
+
+    // interact response
+    let id = Id::new((ui.id(), row, column));
+    let response = ui.interact(cell_rect, id, Sense::click() | Sense::drag());
+
+    let sel_col = state.preferences().style.colours.highlighted;
+
+    // disabling multiple cell selection
+    if response.clicked()
+        || response.double_clicked()
+        || response.secondary_clicked()
+        || response.clicked_elsewhere()
+    {
+        env.selection = None;
+    }
+
+    let Some(cell_data) = env.get(row, column).cloned() else {
+        return;
+    };
+
+    let painter = ui.painter();
+
+    // drawing background (if not transparent)
+    let cell_color = cell_data.color(grid_state);
+    if cell_color != Color32::TRANSPARENT {
+        painter.rect_filled(cell_rect, 0.0, cell_color);
+    }
+
+    // drawing border
+    if cell_is_highlighted {
+        // highlighted
+        let stroke = Stroke::new(2.0, to_colour32(sel_col));
+        painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
+    } else if response.hovered() || response.is_pointer_button_down_on() {
+        // mouse over
+        let stroke = Stroke::new(
+            2.0,
+            to_colour32(state.preferences().style.colours.button_bg),
+        );
+        painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
+    }
+
+    // multiple cell selection
+    if let Some(selection) = &env.selection
+        && cell_data.multiselectable()
+    {
+        let (start_row, start_col) = selection.first;
+        let (end_row, end_col) = selection.last;
+
+        if row >= start_row.min(end_row)
+            && row <= start_row.max(end_row)
+            && column >= start_col.min(end_col)
+            && column <= start_col.max(end_col)
+        {
+            let colour = to_colour32(sel_col).linear_multiply(0.5);
+            let stroke = Stroke::new(2.0, colour);
+            painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
+        }
+    }
+
+    // drawing text (if any)
+    let text = cell_data.text();
+    if let Some(text) = &text {
+        painter.text(
+            cell_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            FontId::default(),
+            cell_data.text_color(project, state),
+        );
+    }
+
+    // drawing inner widget (if any)
+    if cell_data.has_inner_widget(grid_state) {
+        let mut ui = ui.new_child(UiBuilder::new().max_rect(cell_rect));
+        cell_data.inner_widget(&mut ui, grid_state, state, project);
+    }
+
+    // scroll to the highlighted cell if it was changed by keyboard input
+    if scroll_to && cell_is_highlighted {
+        ui.scroll_to_rect(cell_rect, Some(Align::Center));
+    }
+
+    // keyboard input
+    if (env.selection.is_none() && cell_is_highlighted)
+        || env.selection.is_some() && cell_is_selected
+    {
+        if let Some(evt) = ui.input(|i| cell_data.on_keyboard_input(i, grid_state, state, project))
+        {
+            trigger_event(evt, env);
+        }
+    }
+
+    // open context menu (if applicable)
+    let mut context_menu_opened = false;
+    if cell_data.has_context_menu() {
+        response.context_menu(|ui| {
+            context_menu_opened = true;
+            cell_data.context_menu(ui, grid_state, state, project);
+        });
+    }
+
+    // custom click action
+    if response.clicked() {
+        cell_data.on_click(grid_state, state, project);
+    }
+
+    // clicking and double clicking
+    if response.double_clicked() && cell_is_highlighted {
+        // trigger cell action
+        cell_data.trigger_action(grid_state, state, project);
+        env.selection = None;
+    } else if (response.clicked() || context_menu_opened) && cell_data.highlightable() {
+        // highlighting due to click
+        env.set_highlighted_row(row);
+        env.set_highlighted_col(column);
+    }
+
+    // drag enables a multiple cell selection
+    if response.drag_started() {
+        env.selection = Some(GridSelection {
+            first: (row, column),
+            last: (row, column),
+        });
+    }
+
+    // expanding/shrinking multiple cell selection
+    if response.dragged() {
+        // get which cell the mouse is currently over
+        let mouse_pos = ui.input(|i| i.pointer.interact_pos());
+
+        if let Some(mouse_pos) = mouse_pos {
+            let col = ((mouse_pos.x - grid_rect.min.x) / cell_size.x).floor() as usize;
+            let row = ((mouse_pos.y - grid_rect.min.y) / cell_size.y).floor() as usize;
+
+            let n_rows = env.num_rows();
+            let n_cols = env.num_columns();
+            if let Some(selection) = &mut env.selection {
+                selection.last = (row.min(n_rows), col.min(n_cols));
+            }
+        }
+    }
+}
+
+/// Returns true if screen should scroll to the highlighted cell
+fn handle_global_keyboard_input<T, G>(
+    ui: &mut Ui,
+    env: &mut CellGrid<T, G>,
+    grid_state: &mut G,
+    state: &mut AppUIState,
+    project: &Project,
+) -> bool
+where
+    T: Default + Clone + CellData<G>,
+{
     // handle keyboard input
+    let mut should_scroll_to_highlighted = false;
     ui.input(|i| {
         if i.key_pressed(state.preferences().keybinds.trigger_cell)
             && let Some(cell) = env.get(env.highlighted_row(), env.highlighted_col())
@@ -307,171 +512,7 @@ pub fn cells<T, G>(
             }
         }
     });
-
-    for row in 0..env.num_rows() {
-        for column in 0..env.num_columns() {
-            let cell_rect = rect_from_cell_pos(row, column, cell_size, grid_rect);
-            let cell_is_highlighted =
-                row == env.highlighted_row() && column == env.highlighted_col();
-
-            let cell_is_selected = env.selection.as_ref().is_some_and(|selection| {
-                let (start_row, start_col) = selection.first;
-                let (end_row, end_col) = selection.last;
-
-                row >= start_row.min(end_row)
-                    && row <= start_row.max(end_row)
-                    && column >= start_col.min(end_col)
-                    && column <= start_col.max(end_col)
-            });
-
-            if !ui.is_rect_visible(cell_rect) {
-                continue;
-            }
-
-            // interact response
-            let id = Id::new((ui.id(), row, column));
-            let response = ui.interact(cell_rect, id, Sense::click() | Sense::drag());
-
-            let sel_col = state.preferences().style.colours.highlighted;
-
-            // disabling multiple cell selection
-            if response.clicked()
-                || response.double_clicked()
-                || response.secondary_clicked()
-                || response.clicked_elsewhere()
-            {
-                env.selection = None;
-            }
-
-            let Some(cell_data) = env.get(row, column).cloned() else {
-                continue;
-            };
-
-            let painter = ui.painter();
-
-            // drawing background (if not transparent)
-            let cell_color = cell_data.color(grid_state);
-            if cell_color != Color32::TRANSPARENT {
-                painter.rect_filled(cell_rect, 0.0, cell_color);
-            }
-
-            // drawing border
-            if cell_is_highlighted {
-                // highlighted
-                let stroke = Stroke::new(2.0, to_colour32(sel_col));
-                painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
-            } else if response.hovered() || response.is_pointer_button_down_on() {
-                // mouse over
-                let stroke = Stroke::new(
-                    2.0,
-                    to_colour32(state.preferences().style.colours.button_bg),
-                );
-                painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
-            }
-
-            // multiple cell selection
-            if let Some(selection) = &env.selection
-                && cell_data.multiselectable()
-            {
-                let (start_row, start_col) = selection.first;
-                let (end_row, end_col) = selection.last;
-
-                if row >= start_row.min(end_row)
-                    && row <= start_row.max(end_row)
-                    && column >= start_col.min(end_col)
-                    && column <= start_col.max(end_col)
-                {
-                    let colour = to_colour32(sel_col).linear_multiply(0.5);
-                    let stroke = Stroke::new(2.0, colour);
-                    painter.rect_stroke(cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
-                }
-            }
-
-            // drawing text (if any)
-            let text = cell_data.text();
-            if let Some(text) = &text {
-                painter.text(
-                    cell_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    text,
-                    FontId::default(),
-                    cell_data.text_color(project, state),
-                );
-            }
-
-            // drawing inner widget (if any)
-            if cell_data.has_inner_widget(grid_state) {
-                let mut ui = ui.new_child(UiBuilder::new().max_rect(cell_rect));
-                cell_data.inner_widget(&mut ui, grid_state, state, project);
-            }
-
-            // scroll to the highlighted cell if it was changed by keyboard input
-            if should_scroll_to_highlighted && cell_is_highlighted {
-                ui.scroll_to_rect(cell_rect, Some(Align::Center));
-            }
-
-            // keyboard input
-            if (env.selection.is_none() && cell_is_highlighted)
-                || env.selection.is_some() && cell_is_selected
-            {
-                if let Some(evt) =
-                    ui.input(|i| cell_data.on_keyboard_input(i, grid_state, state, project))
-                {
-                    trigger_event(evt, env);
-                }
-            }
-
-            // open context menu (if applicable)
-            let mut context_menu_opened = false;
-            if cell_data.has_context_menu() {
-                response.context_menu(|ui| {
-                    context_menu_opened = true;
-                    cell_data.context_menu(ui, grid_state, state, project);
-                });
-            }
-
-            // custom click action
-            if response.clicked() {
-                cell_data.on_click(grid_state, state, project);
-            }
-
-            // clicking and double clicking
-            if response.double_clicked() && cell_is_highlighted {
-                // trigger cell action
-                cell_data.trigger_action(grid_state, state, project);
-                env.selection = None;
-            } else if (response.clicked() || context_menu_opened) && cell_data.highlightable() {
-                // highlighting due to click
-                env.set_highlighted_row(row);
-                env.set_highlighted_col(column);
-            }
-
-            // drag enables a multiple cell selection
-            if response.drag_started() {
-                env.selection = Some(GridSelection {
-                    first: (row, column),
-                    last: (row, column),
-                });
-            }
-
-            // expanding/shrinking multiple cell selection
-            if response.dragged() {
-                // get which cell the mouse is currently over
-                let mouse_pos = ui.input(|i| i.pointer.interact_pos());
-
-                if let Some(mouse_pos) = mouse_pos {
-                    let col = ((mouse_pos.x - grid_rect.min.x) / cell_size.x).floor() as usize;
-                    let row = ((mouse_pos.y - grid_rect.min.y) / cell_size.y).floor() as usize;
-
-                    let n_rows = env.num_rows();
-                    let n_cols = env.num_columns();
-                    if let Some(selection) = &mut env.selection {
-                        selection.last = (row.min(n_rows), col.min(n_cols));
-                    }
-                }
-            }
-        }
-    }
+    should_scroll_to_highlighted
 }
 
 fn trigger_event<T, G>(event: CellGridEvent, env: &mut CellGrid<T, G>)
