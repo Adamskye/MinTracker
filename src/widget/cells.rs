@@ -32,6 +32,10 @@ impl GridSelection {
     }
 }
 
+pub enum CellGridEvent {
+    SetHighlightedPosition(usize, usize),
+}
+
 /// T is the data stored in each cell
 /// G is the data shared across all cells
 pub struct CellGrid<T, G>
@@ -189,7 +193,8 @@ pub trait CellData<G> {
         _grid_state: &mut G,
         _state: &mut AppUIState,
         _project: &Project,
-    ) {
+    ) -> Option<CellGridEvent> {
+        None
     }
 
     /// Whether cursor can highlight this cell.
@@ -338,7 +343,7 @@ pub fn cells<T, G>(
                 env.selection = None;
             }
 
-            let Some(cell_data) = env.get(row, column) else {
+            let Some(cell_data) = env.get(row, column).cloned() else {
                 continue;
             };
 
@@ -409,9 +414,11 @@ pub fn cells<T, G>(
             if (env.selection.is_none() && cell_is_highlighted)
                 || env.selection.is_some() && cell_is_selected
             {
-                ui.input(|i| {
-                    cell_data.on_keyboard_input(i, grid_state, state, project);
-                });
+                if let Some(evt) =
+                    ui.input(|i| cell_data.on_keyboard_input(i, grid_state, state, project))
+                {
+                    trigger_event(evt, env);
+                }
             }
 
             // open context menu (if applicable)
@@ -463,6 +470,18 @@ pub fn cells<T, G>(
                     }
                 }
             }
+        }
+    }
+}
+
+fn trigger_event<T, G>(event: CellGridEvent, env: &mut CellGrid<T, G>)
+where
+    T: Default + Clone + CellData<G>,
+{
+    match event {
+        CellGridEvent::SetHighlightedPosition(row, col) => {
+            env.set_highlighted_row(row);
+            env.set_highlighted_col(col);
         }
     }
 }

@@ -13,7 +13,7 @@ use crate::{
         VOICES_PER_TRACK,
     },
     synth::{PlayerCmd, PlayerScope, ROProject},
-    widget::cells::{CellData, CellGrid, cells},
+    widget::cells::{CellData, CellGrid, CellGridEvent, cells},
 };
 
 #[derive(Default)]
@@ -143,31 +143,52 @@ impl CellData<GridState> for CellState {
         grid_state: &mut GridState,
         state: &mut AppUIState,
         project: &Project,
-    ) {
+    ) -> Option<CellGridEvent> {
         let Self::Note { note, row, voice } = self else {
-            return;
+            return None;
         };
         let mut note = note.clone();
 
         // get the currently viewed phrase
-        let Some(phrase_id) = state.viewed_phrase else {
-            return;
-        };
+        let phrase_id = state.viewed_phrase?;
 
+        let mut changed = false;
         if input.key_pressed(state.preferences().keybinds.increase) {
             note.semitone = note.semitone.map(|s| s.transposed_by(1));
             if note.semitone.is_none() {
                 note.semitone = Some(grid_state.last_semitone);
             }
+            changed = true;
         } else if input.key_pressed(state.preferences().keybinds.decrease) {
             note.semitone = note.semitone.map(|s| s.transposed_by(-1));
             if note.semitone.is_none() {
                 note.semitone = Some(grid_state.last_semitone);
             }
+            changed = true;
         } else if input.key_pressed(state.preferences().keybinds.delete) {
             note.semitone = None;
-        } else {
-            return;
+            changed = true;
+        } else if input.key_pressed(state.preferences().keybinds.down)
+            && *row >= ROWS_PER_PHRASE - 1
+        {
+            return if go_to_next(state, project) {
+                Some(CellGridEvent::SetHighlightedPosition(0, *voice))
+            } else {
+                None
+            };
+        } else if input.key_pressed(state.preferences().keybinds.up) && *row == 0 {
+            return if go_to_previous(state, project) {
+                Some(CellGridEvent::SetHighlightedPosition(
+                    ROWS_PER_PHRASE - 1,
+                    *voice,
+                ))
+            } else {
+                None
+            };
+        }
+
+        if !changed {
+            return None;
         }
 
         if let Some(s) = note.semitone {
@@ -180,6 +201,8 @@ impl CellData<GridState> for CellState {
             note_index: *row,
             new_note: note,
         });
+
+        None
     }
 
     fn highlightable(&self) -> bool {
@@ -228,42 +251,12 @@ impl Page for PhraseUI {
     }
 
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        let Some(current_row) = state.chain_selected_row else {
-            return;
-        };
-
-        let Some(chain) = state
-            .viewed_chain
-            .and_then(|chain_idx| project.chains().get(&chain_idx))
-        else {
-            return;
-        };
-
         if ui.small_button(regular::ARROW_UP).clicked() {
-            if let Some((new_idx, new_row)) = chain
-                .rows
-                .iter()
-                .enumerate()
-                .take(current_row)
-                .rev()
-                .find(|(_, row)| row.phrase.is_some())
-            {
-                state.chain_selected_row = Some(new_idx);
-                state.viewed_phrase = new_row.phrase;
-            }
+            go_to_previous(state, project);
         }
 
         if ui.small_button(regular::ARROW_DOWN).clicked() {
-            if let Some((new_idx, new_row)) = chain
-                .rows
-                .iter()
-                .enumerate()
-                .skip(current_row + 1)
-                .find(|(_, row)| row.phrase.is_some())
-            {
-                state.chain_selected_row = Some(new_idx);
-                state.viewed_phrase = new_row.phrase;
-            }
+            go_to_next(state, project);
         }
     }
 
@@ -441,5 +434,60 @@ impl PhraseUI {
         let phrase_id = state.viewed_phrase?;
         let phrase = project.phrases().get(&phrase_id)?;
         Some(phrase.voices.get(voice_idx)?.notes.get(note_idx)?.clone())
+    }
+}
+
+fn go_to_previous(state: &mut AppUIState, project: &Project) -> bool {
+    let Some(chain) = state
+        .viewed_chain
+        .and_then(|chain_idx| project.chains().get(&chain_idx))
+    else {
+        return false;
+    };
+
+    let Some(current_row) = state.chain_selected_row else {
+        return false;
+    };
+
+    if let Some((new_idx, new_row)) = chain
+        .rows
+        .iter()
+        .enumerate()
+        .take(current_row)
+        .rev()
+        .find(|(_, row)| row.phrase.is_some())
+    {
+        state.chain_selected_row = Some(new_idx);
+        state.viewed_phrase = new_row.phrase;
+        true
+    } else {
+        false
+    }
+}
+
+fn go_to_next(state: &mut AppUIState, project: &Project) -> bool {
+    let Some(chain) = state
+        .viewed_chain
+        .and_then(|chain_idx| project.chains().get(&chain_idx))
+    else {
+        return false;
+    };
+
+    let Some(current_row) = state.chain_selected_row else {
+        return false;
+    };
+
+    if let Some((new_idx, new_row)) = chain
+        .rows
+        .iter()
+        .enumerate()
+        .skip(current_row + 1)
+        .find(|(_, row)| row.phrase.is_some())
+    {
+        state.chain_selected_row = Some(new_idx);
+        state.viewed_phrase = new_row.phrase;
+        true
+    } else {
+        false
     }
 }

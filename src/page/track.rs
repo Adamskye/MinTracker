@@ -16,7 +16,7 @@ use crate::{
         Track, TracksCmd,
     },
     synth::{PlayerCmd, PlayerScope, ROProject},
-    widget::cells::{self, CellData, CellGrid},
+    widget::cells::{self, CellData, CellGrid, CellGridEvent},
 };
 
 type Clipboard = Vec<Vec<Option<u32>>>;
@@ -154,7 +154,7 @@ impl CellData<GridState> for TrackCellData {
         _grid_state: &mut GridState,
         _ui_state: &mut AppUIState,
         project: &Project,
-    ) {
+    ) -> Option<CellGridEvent> {
         // increase/decrease chain offset (ignore shift for now)
         let TrackCellData::ChainButton {
             track_index,
@@ -162,7 +162,7 @@ impl CellData<GridState> for TrackCellData {
             chain_id: Some(chain_id),
         } = self
         else {
-            return;
+            return None;
         };
 
         let new_chain = if input.key_pressed(Key::Equals)
@@ -199,6 +199,7 @@ impl CellData<GridState> for TrackCellData {
                 new_chain_id: Some(new_chain),
             });
         }
+        None
     }
 }
 

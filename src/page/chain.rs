@@ -14,7 +14,7 @@ use crate::{
         ChainCmd, ChainRow, PhraseCmd, Project, ProjectLocation, ROWS_PER_CHAIN, ROWS_PER_PHRASE,
     },
     synth::{PlayerCmd, PlayerScope, ROProject},
-    widget::cells::{self, CellData, CellGrid},
+    widget::cells::{self, CellData, CellGrid, CellGridEvent},
 };
 
 #[derive(Default, Clone)]
@@ -127,7 +127,7 @@ impl CellData<GridState> for CellState {
         _grid_state: &mut GridState,
         state: &mut AppUIState,
         project: &Project,
-    ) {
+    ) -> Option<CellGridEvent> {
         match self {
             CellState::Phrase { row, id: Some(id) } => {
                 Self::keyboard_input_phrase(*row, *id, input, _grid_state, state, project)
@@ -137,6 +137,7 @@ impl CellData<GridState> for CellState {
             }
             _ => {}
         }
+        None
     }
 }
 
