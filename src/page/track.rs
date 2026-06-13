@@ -1,5 +1,3 @@
-use std::sync::mpsc;
-
 use eframe::{
     egui::{Button, ComboBox, Context, DragValue, Grid, ScrollArea, Ui, Window},
     epaint::Color32,
@@ -12,10 +10,10 @@ use crate::{
     AppUIState,
     page::{Page, PageID},
     project::{
-        CHAINS_PER_TRACK, Chain, ChainCmd, PhraseCmd, Project, ProjectLocation, ProjectTimestamp,
-        Track, TracksCmd,
+        CHAINS_PER_TRACK, Chain, ChainCmd, PhraseCmd, PlayScope, Project, ProjectLocation,
+        ProjectTimestamp, Track, TracksCmd,
     },
-    synth::{PlayerCmd, PlayerScope, ROProject},
+    synth::ROProject,
     widget::cells::{CellGridWidget, cell_data::CellData, event::CellGridEvent},
 };
 
@@ -68,9 +66,8 @@ impl CellData<GridSharedData> for TrackCellData {
             } => grid_state
                 .playing
                 .iter()
-                .flatten()
                 .find(|pos| pos.track_idx == *track_index)
-                .is_some_and(|position| position.chain_offset == *chain_offset),
+                .is_some_and(|position| position.row_in_track == *chain_offset),
             _ => false,
         }
     }
@@ -267,7 +264,7 @@ impl TrackCellData {
 #[derive(Default)]
 struct GridSharedData {
     track_opened_settings: Option<usize>,
-    playing: Vec<Option<ProjectLocation>>,
+    playing: Vec<ProjectLocation>,
 }
 
 pub struct TrackUI {
@@ -300,39 +297,12 @@ impl Page for TrackUI {
     }
 
     fn play(&self, state: &AppUIState, project: ROProject) {
-        let chain_offset = self
-            .cell_grid
-            .state
-            .selection
-            .as_ref()
-            .and_then(|s| {
-                let grid_row = s.first.0.min(s.last.0);
-                self.cell_grid
-                    .state
-                    .get(grid_row, s.first.1)
-                    .and_then(|cell| {
-                        if let TrackCellData::ChainButton { chain_offset, .. } = cell {
-                            Some(*chain_offset)
-                        } else {
-                            None
-                        }
-                    })
-            })
-            .unwrap_or(0);
-
-        let scope = PlayerScope {
-            first_notes: (0..project.read().unwrap().tracks().len())
-                .map(|i| ProjectLocation {
-                    track_idx: i,
-                    chain_offset,
-                    phrase_offset: 0,
-                    note_offset: 0,
-                })
-                .collect(),
-            last_note: None,
-        };
-
-        state.player.play(project, scope);
+        let start_locations = self.play_start_locations(&project.read().unwrap());
+        if !start_locations.is_empty() {
+            state
+                .player
+                .play(project, start_locations, PlayScope::Track);
+        }
     }
 
     fn heading(&self, _: &AppUIState) -> String {
@@ -353,17 +323,8 @@ impl TrackUI {
     }
 
     fn show_tracks(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        // fetch where the player is at
-        let (tx, rx) = mpsc::channel();
-        state.player.send_command(PlayerCmd::RequestLocation(tx));
-
         // update playing position
-        let position_opt: Option<Vec<Option<ProjectLocation>>> = rx.recv().ok();
-        if let Some(position_opt) = &position_opt {
-            self.cell_grid.shared_data.playing = position_opt.clone();
-        } else {
-            self.cell_grid.shared_data.playing = vec![None; project.tracks().len()];
-        }
+        self.cell_grid.shared_data.playing = state.player.request_locations().unwrap_or_default();
 
         // update cells state
 
@@ -561,7 +522,7 @@ impl TrackUI {
                 track
                     .chains
                     .iter()
-                    .cloned()
+                    .copied()
                     .skip(small_row)
                     .take(big_row + 1 - small_row)
                     .collect::<Vec<Option<u32>>>()
@@ -576,9 +537,7 @@ impl TrackUI {
             .cell_grid
             .state
             .selection
-            .as_ref()
-            .map(|s| s.small_row())
-            .unwrap_or_else(|| self.cell_grid.state.highlighted_position().0)
+            .as_ref().map_or_else(|| self.cell_grid.state.highlighted_position().0, super::super::widget::cells::selection::GridSelection::small_row)
             .checked_sub(1)
         else {
             return;
@@ -589,7 +548,7 @@ impl TrackUI {
             .state
             .selection
             .as_ref()
-            .map(|s| s.small_col())
+            .map(super::super::widget::cells::selection::GridSelection::small_col)
             .or_else(|| Some(self.cell_grid.state.highlighted_position().1))
         else {
             return;
@@ -628,6 +587,18 @@ impl TrackUI {
             .collect::<Vec<Track>>();
 
         project.push_cmd(TracksCmd::Update { new_tracks });
+    }
+
+    fn play_start_locations(&self, project: &Project) -> Vec<ProjectLocation> {
+        let row_in_track = self.cell_grid.state.highlighted_row().saturating_sub(1);
+        (0..project.tracks().len())
+            .map(|track_idx| ProjectLocation {
+                track_idx,
+                row_in_track,
+                row_in_chain: 0,
+                row_in_phrase: 0,
+            })
+            .collect()
     }
 }
 

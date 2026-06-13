@@ -77,7 +77,7 @@ fn draw_adsr_graph(ui: &mut Ui, env: &mut ADSREnvelope) {
         points[2] = pos2(points[1].x + env.decay_ms as f32, env.sustain_vol);
         points[3] = pos2(points[2].x + env.release_ms as f32, 0.0);
 
-        for point in points.iter_mut() {
+        for point in &mut points {
             point.x *= width_multiplier;
             point.x += rect.left();
 

@@ -157,7 +157,7 @@ impl EffectsMenu {
                 ems::Slide => page!(slide, slide_page),
                 ems::Envelope => page!(envelope, envelope_page),
                 ems::Pan => page!(pan, pan_page),
-            };
+            }
 
             if ui.button("Remove").clicked() {
                 self.remove_selection(effects);
@@ -194,7 +194,7 @@ impl EffectsMenu {
             ems::Slide => effects.slide = None,
             ems::Envelope => effects.envelope = None,
             ems::Pan => effects.pan = None,
-        };
+        }
         self.selected = EffectMenuSelected::AddEffect;
     }
 

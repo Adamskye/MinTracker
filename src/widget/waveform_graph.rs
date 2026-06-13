@@ -65,7 +65,7 @@ impl WaveformGraph {
             if i < first_quartile {
                 *val = (gradient * i).into();
             } else if i < third_quartile {
-                *val = (1.0 + (-gradient * (i - first_quartile))).into()
+                *val = (1.0 + (-gradient * (i - first_quartile))).into();
             } else {
                 *val = ((gradient * (i - third_quartile)) - 1.0).into();
             }
@@ -113,7 +113,7 @@ impl WaveformGraph {
                 data_table
                     .data
                     .iter_mut()
-                    .for_each(|point| *point = (point.value() * multiplier).into())
+                    .for_each(|point| *point = (point.value() * multiplier).into());
             }
         });
 

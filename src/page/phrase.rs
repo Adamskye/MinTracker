@@ -1,5 +1,3 @@
-use std::sync::mpsc;
-
 use egui::{Align2, Color32, Key, ScrollArea, Sense, Ui};
 use egui_phosphor::regular::{self, FUNCTION, MINUS};
 
@@ -9,10 +7,10 @@ use crate::{
     helpers,
     page::Page,
     project::{
-        Note, NoteEffects, Phrase, PhraseCmd, Project, ProjectLocation, ROWS_PER_PHRASE, Semitone,
-        VOICES_PER_TRACK,
+        Note, NoteEffects, Phrase, PhraseCmd, PlayScope, Project, ProjectLocation, ROWS_PER_PHRASE,
+        Semitone, VOICES_PER_TRACK,
     },
-    synth::{PlayerCmd, PlayerScope, ROProject},
+    synth::ROProject,
     widget::cells::{CellGridWidget, cell_data::CellData, event::CellGridEvent},
 };
 
@@ -54,7 +52,7 @@ impl CellData<GridState> for CellState {
         match self {
             CellState::Empty => None,
             CellState::Note { note, .. } => {
-                Some(note.semitone.map(|s| s.to_string()).unwrap_or(MINUS.into()))
+                Some(note.semitone.map_or(MINUS.into(), |s| s.to_string()))
             }
             CellState::AddEffect { .. } => Some(FUNCTION.into()),
         }
@@ -75,8 +73,7 @@ impl CellData<GridState> for CellState {
                     .and_then(|phrase| phrase.voices.get(*voice))
                     .and_then(|v| v.notes.get(*row))
                     .filter(|n| !n.effects.is_empty())
-                    .map(|_| helpers::to_colour32(state.preferences().style.colours.highlighted))
-                    .unwrap_or(default)
+                    .map_or(default, |_| helpers::to_colour32(state.preferences().style.colours.highlighted))
             }
             _ => default,
         }
@@ -229,6 +226,9 @@ impl CellState {
 
 pub struct PhraseUI {
     cell_grid: CellGridWidget<CellState, GridState>,
+
+    // used for buffering player
+    last_seen_phrase_id: Option<u32>,
 }
 
 impl Default for PhraseUI {
@@ -239,12 +239,18 @@ impl Default for PhraseUI {
                 VOICES_PER_TRACK * 2,
                 GridState::default(),
             ),
+            last_seen_phrase_id: None,
         }
     }
 }
 
 impl Page for PhraseUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
+        if self.last_seen_phrase_id != state.viewed_phrase {
+            self.handle_player_buffering(state);
+        }
+        self.last_seen_phrase_id = state.viewed_phrase;
+
         // set up cell grid
         let Some(phrase) = state
             .viewed_phrase
@@ -276,31 +282,9 @@ impl Page for PhraseUI {
     }
 
     fn play(&self, state: &AppUIState, project: ROProject) {
-        let (Some(track_idx), Some(chain_offset), Some(phrase_offset)) = (
-            state.viewed_track,
-            state.track_selected_row,
-            state.chain_selected_row,
-        ) else {
-            return;
-        };
-
-        let scope = PlayerScope {
-            first_notes: vec![ProjectLocation {
-                track_idx,
-                chain_offset,
-                phrase_offset,
-                note_offset: 0,
-            }]
-            .into(),
-            last_note: Some(ProjectLocation {
-                track_idx,
-                chain_offset,
-                phrase_offset,
-                note_offset: ROWS_PER_PHRASE - 1,
-            }),
-        };
-
-        state.player.play(project, scope);
+        if let Some(start) = self.play_start_location(state) {
+            state.player.play(project, vec![start], PlayScope::Phrase);
+        }
     }
 
     fn heading(&self, state: &AppUIState) -> String {
@@ -348,18 +332,15 @@ impl PhraseUI {
     }
 
     fn playing_row(&self, state: &AppUIState) -> Option<usize> {
-        let (tx, rx) = mpsc::channel();
-        state.player.send_command(PlayerCmd::RequestLocation(tx));
-        let positions = rx.recv().ok()?;
         let track_idx = state.viewed_track?;
-
-        let pos = positions.iter().flatten().find(|pos| {
+        let positions = state.player.request_locations()?;
+        let pos = positions.iter().find(|pos| {
             pos.track_idx == track_idx
-                && Some(pos.chain_offset) == state.track_selected_row
-                && Some(pos.phrase_offset) == state.chain_selected_row
+                && Some(pos.row_in_track) == state.track_selected_row
+                && Some(pos.row_in_chain) == state.chain_selected_row
         })?;
 
-        Some(pos.note_offset)
+        Some(pos.row_in_phrase)
     }
 
     fn show_fx_menu(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
@@ -383,7 +364,7 @@ impl PhraseUI {
 
         let original_note = note.clone();
 
-        let viewport_rect = ui.input(|i| i.viewport_rect());
+        let viewport_rect = ui.input(egui::InputState::viewport_rect);
         let area_response = egui::Area::new("fx_dialog_bg".into())
             .order(egui::Order::Foreground)
             .interactable(true)
@@ -442,6 +423,32 @@ impl PhraseUI {
         let phrase_id = state.viewed_phrase?;
         let phrase = project.phrases().get(&phrase_id)?;
         Some(phrase.voices.get(voice_idx)?.notes.get(note_idx)?.clone())
+    }
+
+    fn play_start_location(&self, state: &AppUIState) -> Option<ProjectLocation> {
+        Some(ProjectLocation {
+            track_idx: state.viewed_track?,
+            row_in_track: state.track_selected_row?,
+            row_in_chain: state.chain_selected_row?,
+            row_in_phrase: self.cell_grid.state.highlighted_row(),
+        })
+    }
+
+    fn handle_player_buffering(&self, state: &mut AppUIState) {
+        // if not playing just a phrase, then skip
+        if !matches!(state.player.request_scope(), Some(PlayScope::Phrase)) {
+            return;
+        }
+
+        let Some(mut starting_position) = self.play_start_location(state) else {
+            return;
+        };
+
+        starting_position.row_in_phrase = 0;
+
+        state
+            .player
+            .play_buffered(vec![starting_position], PlayScope::Phrase);
     }
 }
 

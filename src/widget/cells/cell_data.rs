@@ -12,7 +12,7 @@ pub trait CellData<G> {
         helpers::to_colour32(state.preferences().style.colours.text)
     }
 
-    /// Inner widget of cell. Only called if has_inner_widget returns true.
+    /// Inner widget of cell. Only called if `has_inner_widget` returns true.
     fn inner_widget(
         &self,
         _ui: &mut Ui,
@@ -37,7 +37,7 @@ pub trait CellData<G> {
         false
     }
 
-    /// Context menu when right-clicked. Only shows if has_context_menu() returns true.
+    /// Context menu when right-clicked. Only shows if `has_context_menu()` returns true.
     fn context_menu(
         &self,
         _ui: &mut Ui,
@@ -49,7 +49,7 @@ pub trait CellData<G> {
 
     /// Extra action to perform when double clicked or trigger button is pressed when this cell is
     /// highlighted.
-    /// By default, will call self.on_click(...)
+    /// By default, will call `self.on_click`(...)
     fn trigger_action(&self, shared_data: &mut G, state: &mut AppUIState, project: &Project) {
         self.on_click(shared_data, state, project);
     }

@@ -37,7 +37,7 @@ impl From<u8> for Semitone<u8> {
 
 impl From<f32> for Semitone<f32> {
     fn from(value: f32) -> Self {
-        Self(value.clamp(0.0, (NUM_SEMITONES - 1) as f32))
+        Self(value.clamp(0.0, f32::from(NUM_SEMITONES - 1)))
     }
 }
 
@@ -53,7 +53,7 @@ impl Semitone {
     }
 
     pub fn transposed_by(&self, amount: i32) -> Semitone {
-        Semitone::from(((self.0 as i32).saturating_add(amount)) as u8)
+        Semitone::from((i32::from(self.0).saturating_add(amount)) as u8)
     }
 }
 

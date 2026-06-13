@@ -200,12 +200,12 @@ impl InstrumentUI {
                 let label = if trimmed_name.is_empty() {
                     i.to_string()
                 } else {
-                    format!("{} {}", i, trimmed_name)
+                    format!("{i} {trimmed_name}")
                 };
 
                 if ui
                     .selectable_label(
-                        s.selected_data_table.map(|s_dt| s_dt == i).unwrap_or(false),
+                        s.selected_data_table.is_some_and(|s_dt| s_dt == i),
                         label,
                     )
                     .clicked()
@@ -241,7 +241,7 @@ impl InstrumentUI {
         }
 
         if ui.button("Apply Changes").clicked() {
-            Self::apply(s, state, project)
+            Self::apply(s, state, project);
         }
     }
 
@@ -261,8 +261,7 @@ impl InstrumentUI {
                                     None
                                 }
                             })
-                            .map(|m| m.to_string())
-                            .unwrap_or("-".to_string()),
+                            .map_or("-".to_string(), |m| m.to_string()),
                     );
 
                     if let Some(selected_dt) = s.selected_data_table
@@ -290,7 +289,7 @@ impl InstrumentUI {
         };
 
         s.instrument_id = state.viewed_instrument;
-        s.name_textbox = instrument.name.to_string();
+        s.name_textbox = instrument.name.clone();
         s.data_tables = instrument
             .data_tables
             .iter()
@@ -338,7 +337,7 @@ impl InstrumentUI {
                     std::cmp::Ordering::Greater => *mapping -= 1,
                     std::cmp::Ordering::Equal => *mapping_opt = None,
                     std::cmp::Ordering::Less => (),
-                };
+                }
             }
         }
     }

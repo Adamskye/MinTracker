@@ -41,7 +41,7 @@ impl Page for PreferencesUI {
                     .selectable_label(self.current_tab == tab, format!("{tab:?}"))
                     .clicked()
                 {
-                    self.current_tab = tab
+                    self.current_tab = tab;
                 }
             }
         });
@@ -108,7 +108,7 @@ impl PreferencesUI {
 
                     if time != new_time {
                         ui_state.modify_preferences(|prefs| {
-                            prefs.general.notification_time = Some(new_time)
+                            prefs.general.notification_time = Some(new_time);
                         });
                     }
                 }
@@ -116,7 +116,7 @@ impl PreferencesUI {
             });
 
         if ui.button("Reset to Default").clicked() {
-            ui_state.modify_preferences(|prefs| prefs.general = General::default())
+            ui_state.modify_preferences(|prefs| prefs.general = General::default());
         }
     }
     fn keybinds_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
@@ -157,7 +157,7 @@ impl PreferencesUI {
             });
 
         if ui.button("Reset to Default").clicked() {
-            ui_state.modify_preferences(|prefs| prefs.keybinds = Keybinds::default())
+            ui_state.modify_preferences(|prefs| prefs.keybinds = Keybinds::default());
         }
     }
 
@@ -170,7 +170,7 @@ impl PreferencesUI {
     ) {
         ui.label(action_name);
         if ui.small_button(format!("{key:?}")).clicked() {
-            self.recording_key = Some(rebind_func)
+            self.recording_key = Some(rebind_func);
         }
         ui.end_row();
     }
@@ -185,7 +185,7 @@ impl PreferencesUI {
                         };
 
                         ui_state.modify_preferences(|prefs| {
-                            prefs.keybinds = rebind_func(prefs.keybinds.clone(), *key)
+                            prefs.keybinds = rebind_func(prefs.keybinds.clone(), *key);
                         });
 
                         self.recording_key = None;
@@ -231,7 +231,7 @@ impl PreferencesUI {
                             ui.selectable_value(
                                 &mut style.ui_scale,
                                 scale,
-                                format!("{:.2}", scale),
+                                format!("{scale:.2}"),
                             );
                         }
                     });
@@ -287,7 +287,7 @@ impl PreferencesUI {
             });
 
         if ui.button("Reset to Default").clicked() {
-            ui_state.modify_preferences(|prefs| prefs.style.colours = Colours::default())
+            ui_state.modify_preferences(|prefs| prefs.style.colours = Colours::default());
         }
     }
 }

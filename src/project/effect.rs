@@ -34,7 +34,7 @@ pub struct NoteEffects {
 }
 
 impl NoteEffects {
-    /// adds effects from another NoteEffects struct
+    /// adds effects from another `NoteEffects` struct
     pub fn add_from_other(&mut self, other: &NoteEffects) {
         add_from_other!(
             self, other, vibrato, kill, pitch_bend, slide, envelope, pan, soft_kill

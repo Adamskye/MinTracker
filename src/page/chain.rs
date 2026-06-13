@@ -1,5 +1,3 @@
-use std::sync::mpsc;
-
 use eframe::{
     egui::{ScrollArea, Ui},
     epaint::Color32,
@@ -10,10 +8,8 @@ use egui_phosphor::regular;
 use crate::{
     AppUIState,
     page::{Page, PageID},
-    project::{
-        ChainCmd, ChainRow, PhraseCmd, Project, ProjectLocation, ROWS_PER_CHAIN, ROWS_PER_PHRASE,
-    },
-    synth::{PlayerCmd, PlayerScope, ROProject},
+    project::{ChainCmd, ChainRow, PhraseCmd, PlayScope, Project, ProjectLocation, ROWS_PER_CHAIN},
+    synth::ROProject,
     widget::cells::{CellGridWidget, cell_data::CellData, event::CellGridEvent},
 };
 
@@ -130,10 +126,10 @@ impl CellData<GridState> for CellState {
     ) -> Option<CellGridEvent> {
         match self {
             CellState::Phrase { row, id: Some(id) } => {
-                Self::keyboard_input_phrase(*row, *id, input, _grid_state, state, project)
+                Self::keyboard_input_phrase(*row, *id, input, _grid_state, state, project);
             }
             CellState::Transpose { row, .. } => {
-                Self::keyboard_input_transpose(*row, input, _grid_state, state, project)
+                Self::keyboard_input_transpose(*row, input, _grid_state, state, project);
             }
             _ => {}
         }
@@ -346,56 +342,14 @@ impl Page for ChainUI {
     fn handle_undo(&mut self, _project: &Project) {}
 
     fn play(&self, state: &AppUIState, project: ROProject) {
-        let (Some(track_idx), Some(chain_offset)) = (state.viewed_track, state.track_selected_row)
-        else {
-            return;
-        };
-
-        let Some(last_phrase_offset) =
-            Self::get_last_row_to_play(track_idx, chain_offset, &project.read().unwrap())
-        else {
-            return;
-        };
-
-        let scope = PlayerScope {
-            first_notes: vec![ProjectLocation {
-                track_idx,
-                chain_offset,
-                phrase_offset: self.cell_grid.state.highlighted_row(),
-                note_offset: 0,
-            }]
-            .into(),
-            last_note: Some(ProjectLocation {
-                track_idx,
-                chain_offset,
-                phrase_offset: last_phrase_offset,
-                note_offset: ROWS_PER_PHRASE - 1,
-            }),
-        };
-
-        state.player.play(project, scope);
+        if let Some(start) = self.play_start_location(state) {
+            state.player.play(project, vec![start], PlayScope::Chain);
+        }
     }
 
     fn play_global(&self, state: &AppUIState, project: ROProject) {
-        let Some(chain_offset) = state.track_selected_row else {
-            return;
-        };
-
-        let num_tracks = project.read().unwrap().tracks().len();
-
-        let scope = PlayerScope {
-            first_notes: (0..num_tracks)
-                .map(|track_idx| ProjectLocation {
-                    track_idx,
-                    chain_offset,
-                    phrase_offset: self.cell_grid.state.highlighted_row(),
-                    note_offset: 0,
-                })
-                .collect(),
-            last_note: None,
-        };
-
-        state.player.play(project, scope);
+        let start = self.play_start_location_global(state, &project.read().unwrap());
+        state.player.play(project, start, PlayScope::Chain);
     }
 
     fn heading(&self, state: &AppUIState) -> String {
@@ -414,42 +368,15 @@ impl ChainUI {
         });
     }
 
-    fn get_last_row_to_play(
-        track_idx: usize,
-        chain_offset: usize,
-        project: &Project,
-    ) -> Option<usize> {
-        // find end of chain
-        let first_none_offset = project
-            .tracks()
-            .get(track_idx)
-            .and_then(|track| track.chains.get(chain_offset))
-            .and_then(|chain_id_opt| *chain_id_opt)
-            .and_then(|chain_id| project.chains().get(&chain_id))
-            .map(|chain| &chain.rows)
-            .map(|rows| {
-                rows.iter()
-                    .position(|row| row.phrase.is_none())
-                    .unwrap_or(rows.len())
-            })?;
-
-        // if the first slot in the chain doesn't contain a phrase id
-        if first_none_offset == 0 {
-            None
-        } else {
-            Some(first_none_offset.saturating_sub(1))
-        }
-    }
-
     fn playing_row(&self, state: &AppUIState) -> Option<usize> {
-        let (tx, rx) = mpsc::channel();
-        state.player.send_command(PlayerCmd::RequestLocation(tx));
-        let positions = rx.recv().ok()?;
-
-        positions.iter().flatten().find(|pos| {
-            Some(pos.track_idx) == state.viewed_track
-                && Some(pos.chain_offset) == state.track_selected_row
-        }).map(|pos| pos.phrase_offset)
+        let positions = state.player.request_locations()?;
+        positions
+            .iter()
+            .find(|pos| {
+                Some(pos.track_idx) == state.viewed_track
+                    && Some(pos.row_in_track) == state.track_selected_row
+            })
+            .map(|pos| pos.row_in_chain)
     }
 
     fn show_phrase_list(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
@@ -572,9 +499,7 @@ impl ChainUI {
             .cell_grid
             .state
             .selection
-            .as_ref()
-            .map(|s| s.small_row())
-            .unwrap_or_else(|| self.cell_grid.state.highlighted_position().0);
+            .as_ref().map_or_else(|| self.cell_grid.state.highlighted_position().0, super::super::widget::cells::selection::GridSelection::small_row);
 
         // paste from clipboard, starting at row
         match &self.clipboard {
@@ -604,5 +529,31 @@ impl ChainUI {
             id: state.viewed_chain.unwrap(),
             new_chain: chain,
         });
+    }
+
+    fn play_start_location(&self, state: &AppUIState) -> Option<ProjectLocation> {
+        Some(ProjectLocation {
+            track_idx: state.viewed_track?,
+            row_in_track: state.track_selected_row?,
+            row_in_chain: self.cell_grid.state.highlighted_row(),
+            row_in_phrase: 0,
+        })
+    }
+
+    fn play_start_location_global(
+        &self,
+        state: &AppUIState,
+        project: &Project,
+    ) -> Vec<ProjectLocation> {
+        (0..project.tracks().len())
+            .filter_map(|track_idx| {
+                Some(ProjectLocation {
+                    track_idx,
+                    row_in_track: state.track_selected_row?,
+                    row_in_chain: self.cell_grid.state.highlighted_row(),
+                    row_in_phrase: 0,
+                })
+            })
+            .collect()
     }
 }

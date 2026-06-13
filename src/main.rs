@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     path::PathBuf,
-    sync::{Arc, RwLock, mpsc},
+    sync::{Arc, RwLock},
 };
 
 use crate::{
@@ -15,11 +15,11 @@ use eframe::{
     App,
     egui::{self, Button, DragValue, Key, Ui, ViewportCommand},
 };
-use egui::{Align, Color32, Context, Frame, Layout, RichText, Sense, Vec2};
+use egui::{Align, Color32, Context, Frame, InputState, Layout, RichText, Sense, Vec2};
 use egui_phosphor::regular;
 use egui_toast::ToastKind;
 use project::{Project, ProjectSettings};
-use synth::{PlayerCmd, ROProject};
+use synth::ROProject;
 
 mod app_ui_state;
 mod cache;
@@ -84,7 +84,7 @@ impl Default for MinTracker {
     fn default() -> Self {
         Self {
             ui_state: AppUIState::new(),
-            project: Default::default(),
+            project: Arc::default(),
 
             pages: Pages::new(),
 
@@ -99,8 +99,8 @@ impl App for MinTracker {
         self.handle_global_keybinds(ctx);
         self.update_project_events();
 
-        if self.ui_state.player.is_playing() {
-            ctx.request_repaint()
+        if self.ui_state.player.is_alive() {
+            ctx.request_repaint();
         }
 
         Self::set_style(ctx);
@@ -189,8 +189,8 @@ impl MinTracker {
     fn handle_global_keybinds(&mut self, ctx: &Context) {
         // handle audio
         if ctx.input(|i| i.key_pressed(self.ui_state.preferences().keybinds.play_pause)) {
-            if self.ui_state.player.is_playing() {
-                self.ui_state.player.send_command(PlayerCmd::Stop);
+            if self.ui_state.player.is_alive() {
+                self.ui_state.player.stop();
             } else {
                 self.play_viewed(ctx.input(|i| i.modifiers.shift));
             }
@@ -219,10 +219,10 @@ impl MinTracker {
         // handle save and load,
         ctx.input(|i| {
             if i.key_pressed(Key::S) && i.modifiers.ctrl {
-                self.save()
+                self.save();
             }
             if i.key_pressed(Key::O) && i.modifiers.ctrl {
-                self.load(None)
+                self.load(None);
             }
         });
 
@@ -244,7 +244,7 @@ impl MinTracker {
             .interactable(true)
             .fixed_pos([0.0, 0.0])
             .show(ctx, |ui| {
-                let rect = ui.input(|i| i.viewport_rect());
+                let rect = ui.input(InputState::viewport_rect);
                 ui.painter()
                     .rect_filled(rect, 0.0, Color32::from_black_alpha(150));
                 ui.allocate_rect(rect, Sense::click());
@@ -292,21 +292,34 @@ impl MinTracker {
     }
 
     fn button_panel(&mut self, ui: &mut Ui) {
+        self.project_option_buttons(ui);
+        ui.add_space(20.0);
+        self.song_option_buttons(ui);
+        ui.add_space(20.0);
+        self.player_controller(ui);
+        ui.add_space(20.0);
+        self.pages
+            .page_mut(self.ui_state.current_page)
+            .draw_side_buttons(ui, &mut self.ui_state, &self.project.read().unwrap());
+    }
+
+    fn project_option_buttons(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             if ui
                 .button(egui_phosphor::regular::FOLDER)
                 .on_hover_text("Open (CTRL+O)")
                 .clicked()
             {
-                self.load(None)
+                self.load(None);
             }
             if ui
                 .button(egui_phosphor::regular::FLOPPY_DISK)
                 .on_hover_text("Save (CTRL+S)")
                 .clicked()
             {
-                self.save()
+                self.save();
             }
+
             if ui
                 .button(egui_phosphor::regular::BROOM)
                 .on_hover_text("Clean Project")
@@ -329,7 +342,7 @@ impl MinTracker {
                 ))
                 .clicked()
             {
-                self.ui_state.current_page = PageID::Preferences
+                self.ui_state.current_page = PageID::Preferences;
             }
         });
 
@@ -343,12 +356,11 @@ impl MinTracker {
                 }
             })
         });
+    }
 
-        ui.add_space(20.0);
-
+    fn song_option_buttons(&mut self, ui: &mut Ui) {
         let proj = self.project.read().unwrap();
         let settings = proj.settings();
-
         let _ = ui.menu_button(format!("{} Tempo", regular::METRONOME), |ui| {
             let mut tempo_value = settings.tempo;
             ui.add(DragValue::new(&mut tempo_value).range(1.0..=1000.0));
@@ -374,43 +386,37 @@ impl MinTracker {
                 proj.push_cmd(ProjectCmd::UpdateSettings(new_settings));
             }
         });
+    }
 
-        ui.add_space(20.0);
-
-        let player_active = self.ui_state.player.is_playing();
-        let is_paused = {
-            let (tx, rx) = mpsc::channel();
-            self.ui_state
-                .player
-                .send_command(PlayerCmd::RequestIsPaused(tx));
-
-            rx.recv().unwrap_or(false)
-        };
-
+    fn player_controller(&mut self, ui: &mut Ui) {
+        let proj = self.project.read().unwrap();
+        let settings = proj.settings();
+        let player_alive = self.ui_state.player.is_alive();
+        let is_paused = self.ui_state.player.is_paused();
         ui.horizontal(|ui| {
-            if player_active
+            if player_alive
                 && !is_paused
                 && ui.button(regular::PAUSE).on_hover_text("Pause").clicked()
             {
-                self.ui_state.player.send_command(PlayerCmd::Pause);
+                self.ui_state.player.set_paused(true);
             }
 
-            if (!player_active || is_paused)
+            if (!player_alive || is_paused)
                 && ui.button(regular::PLAY).on_hover_text("Play").clicked()
             {
-                if player_active {
-                    self.ui_state.player.send_command(PlayerCmd::Resume);
+                if player_alive {
+                    self.ui_state.player.set_paused(false);
                 } else {
                     self.play_viewed(ui.input(|i| i.modifiers.shift));
                 }
             }
 
             if ui
-                .add_enabled(player_active, Button::new(regular::STOP))
+                .add_enabled(player_alive, Button::new(regular::STOP))
                 .on_hover_text("Stop")
                 .clicked()
             {
-                self.ui_state.player.send_command(PlayerCmd::Stop);
+                self.ui_state.player.stop();
             }
 
             let loop_button = Button::selectable(settings.loop_player, regular::REPEAT);
@@ -419,14 +425,8 @@ impl MinTracker {
                     loop_player: !settings.loop_player,
                     ..settings.clone()
                 }));
-            };
+            }
         });
-
-        ui.add_space(20.0);
-
-        self.pages
-            .page_mut(self.ui_state.current_page)
-            .draw_side_buttons(ui, &mut self.ui_state, &proj);
     }
 
     fn pages_panel(&mut self, ui: &mut Ui) {
@@ -494,7 +494,7 @@ impl MinTracker {
                 serde_cbor::to_writer(file, &self.project)
                     .map_err(|e| format!("Failed to save project: {e}"))
             }) {
-            Ok(_) => {
+            Ok(()) => {
                 self.ui_state.project_dirty = false;
                 self.ui_state.add_toast(ToastKind::Success, "Project saved");
             }
@@ -545,9 +545,10 @@ impl MinTracker {
 
     fn play_viewed(&self, global: bool) {
         let page = self.pages.page(self.ui_state.current_page);
-        match global {
-            true => page.play_global(&self.ui_state, ROProject::new(self.project.clone())),
-            false => page.play(&self.ui_state, ROProject::new(self.project.clone())),
+        if global {
+            page.play_global(&self.ui_state, ROProject::new(self.project.clone()));
+        } else {
+            page.play(&self.ui_state, ROProject::new(self.project.clone()));
         }
     }
 }

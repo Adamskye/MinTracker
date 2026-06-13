@@ -24,9 +24,93 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Copy, Clone, PartialEq)]
 pub struct ProjectLocation {
     pub track_idx: usize,
-    pub chain_offset: usize,
-    pub phrase_offset: usize,
-    pub note_offset: usize,
+    pub row_in_track: usize,
+    pub row_in_chain: usize,
+    pub row_in_phrase: usize,
+}
+
+impl ProjectLocation {
+    /// Increments project location, or returns None if the end was reached.
+    pub fn increment(
+        mut self,
+        project: &Project,
+        scope: PlayScope,
+        loop_when_finished: bool,
+    ) -> Option<ProjectLocation> {
+        // handle incrementing (if possible)
+        let result = match scope {
+            PlayScope::Phrase => if self.row_in_phrase >= ROWS_PER_PHRASE - 1 { None } else { self.move_forward_once(project) },
+            PlayScope::Chain => if self.row_in_chain >= ROWS_PER_CHAIN - 1 { None } else { self.move_forward_once(project) },
+            PlayScope::Track => self.move_forward_once(project),
+        };
+
+        // handle looping
+        if loop_when_finished && result.is_none() {
+            self.row_in_phrase = 0;
+            match scope {
+                PlayScope::Phrase => {}
+                PlayScope::Chain => {
+                    self.row_in_chain = 0;
+                }
+                PlayScope::Track => {
+                    self.row_in_chain = 0;
+                    self.row_in_track = 0;
+                }
+            }
+            Some(self)
+        } else {
+            result
+        }
+    }
+
+    fn move_forward_once(mut self, project: &Project) -> Option<ProjectLocation> {
+        // check if location is valid first
+        self.get_notes_at_location(project)?;
+
+        self.row_in_phrase += 1;
+        if self.get_notes_at_location(project).is_some() {
+            return Some(self);
+        }
+
+        self.row_in_phrase = 0;
+        self.row_in_chain += 1;
+        if self.get_notes_at_location(project).is_some() {
+            return Some(self);
+        }
+
+        self.row_in_chain = 0;
+        self.row_in_track += 1;
+        if self.get_notes_at_location(project).is_some() {
+            return Some(self);
+        }
+
+        None
+    }
+
+    pub fn get_notes_at_location(&self, project: &Project) -> Option<Vec<Note>> {
+        let track = project.tracks().get(self.track_idx)?;
+        let chain_id = (*track.chains.get(self.row_in_track)?)?;
+        let chain = project.chains().get(&chain_id)?;
+        let phrase_id = chain.rows.get(self.row_in_chain)?.phrase?;
+        let phrase = project.phrases().get(&phrase_id)?;
+        let notes = phrase
+            .voices
+            .iter()
+            .filter_map(|voice| voice.notes.get(self.row_in_phrase).cloned())
+            .collect::<Vec<_>>();
+        (!notes.is_empty()).then_some(notes)
+    }
+}
+
+/// Rulesets for incrementing `ProjectLocation`
+#[derive(Clone, Copy)]
+pub enum PlayScope {
+    /// Finish once the end of the phrase is reached
+    Phrase,
+    /// Finish once the end of the chain is reached
+    Chain,
+    /// Finish once the end of the track is reached
+    Track,
 }
 
 pub trait Cmd: Send + Sync {
@@ -507,53 +591,6 @@ impl Project {
         ));
     }
 
-    /// Increments project location, or returns None if the end was reached.
-    pub fn increment_project_location(&self, location: ProjectLocation) -> Option<ProjectLocation> {
-        self.get_notes_at_location(location)?;
-        let mut new_location = location;
-
-        new_location.note_offset += 1;
-        if self.get_notes_at_location(new_location).is_some() {
-            return Some(new_location);
-        }
-
-        new_location.note_offset = 0;
-        new_location.phrase_offset += 1;
-        if self.get_notes_at_location(new_location).is_some() {
-            return Some(new_location);
-        }
-
-        new_location.phrase_offset = 0;
-        new_location.chain_offset += 1;
-        if self.get_notes_at_location(new_location).is_some() {
-            return Some(new_location);
-        }
-
-        None
-    }
-
-    pub fn get_notes_at_location(&self, location: ProjectLocation) -> Option<Arc<[&Note]>> {
-        self.tracks()
-            .get(location.track_idx)
-            .and_then(|track| track.chains.get(location.chain_offset).cloned())
-            .flatten()
-            .and_then(|chain_id| self.chains().get(&chain_id))
-            .and_then(|chain| chain.rows.get(location.phrase_offset).cloned())
-            .and_then(|row| row.phrase)
-            .and_then(|phrase_id| self.phrases().get(&phrase_id))
-            .and_then(|phrase| {
-                let notes = phrase
-                    .voices
-                    .iter()
-                    .filter_map(|voice| voice.notes.get(location.note_offset))
-                    .collect::<Vec<&Note>>();
-                if notes.is_empty() {
-                    return None;
-                }
-                Some(notes.into())
-            })
-    }
-
     pub fn get_unique_key<T>(map: &BTreeMap<u32, T>) -> u32 {
         for potential_key in 0.. {
             if !map.contains_key(&potential_key) {
@@ -575,9 +612,8 @@ impl Project {
             if !map.contains_key(&potential_key) {
                 if countdown == 0 {
                     return potential_key;
-                } else {
-                    countdown -= 1;
                 }
+                countdown -= 1;
             }
         }
 
@@ -592,7 +628,7 @@ impl Project {
         // - a phrase can be transposed inside a chain
         // - an instrument??? (todo)
 
-        let project_trans = self.settings().transpose as i32;
+        let project_trans = i32::from(self.settings().transpose);
         let track = self
             .tracks()
             .get(location.track_idx)?
@@ -601,12 +637,11 @@ impl Project {
         let inside_chain = self
             .tracks()
             .get(location.track_idx)
-            .and_then(|track| track.chains.get(location.chain_offset).cloned())
+            .and_then(|track| track.chains.get(location.row_in_track).copied())
             .and_then(|chain_id_opt| chain_id_opt)
             .and_then(|chain_id| self.chains().get(&chain_id))
-            .and_then(|chain| chain.rows.get(location.phrase_offset))
-            .map(|row| row.transpose)
-            .unwrap_or(0);
+            .and_then(|chain| chain.rows.get(location.row_in_chain))
+            .map_or(0, |row| row.transpose);
 
         Some(project_trans + track + inside_chain)
     }

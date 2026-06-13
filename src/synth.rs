@@ -13,7 +13,7 @@ use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
 use crate::{
     helpers,
     project::{
-        InstrumentDataTable, InstrumentVariant, NoteEffects, Project, ProjectLocation,
+        InstrumentDataTable, InstrumentVariant, NoteEffects, PlayScope, Project, ProjectLocation,
         ProjectSettings, Semitone, SlideEffect, TrackSettings, VOICES_PER_TRACK,
     },
 };
@@ -34,24 +34,14 @@ impl ROProject {
     }
 }
 
-pub enum PlayerCmd {
-    UpdateBuffer(PlayerScope),
-    Pause,
-    Resume,
+enum PlayerCmd {
+    UpdateBuffer(Vec<ProjectLocation>, PlayScope),
+    SetPaused(bool),
     Stop,
     Dummy,
     RequestIsPaused(Sender<bool>),
-    RequestLocation(Sender<Vec<Option<ProjectLocation>>>),
-    RequestScope(Sender<Arc<PlayerScope>>),
-    RequestBuffer(Sender<Option<Arc<PlayerScope>>>),
-}
-
-// When playing anything, a PlayerScope is defined per track. That track will stop playing when the
-// last note is hit, or it will play until the end if last_note is set to None.
-#[derive(Clone)]
-pub struct PlayerScope {
-    pub first_notes: Arc<[ProjectLocation]>,
-    pub last_note: Option<ProjectLocation>,
+    RequestScope(Sender<PlayScope>),
+    RequestLocation(Sender<Vec<ProjectLocation>>),
 }
 
 #[derive(Default)]
@@ -60,19 +50,49 @@ pub struct Player {
 }
 
 impl Player {
-    // todo: use PlayerScope
-    pub fn play(&self, project: ROProject, scope: PlayerScope) {
+    pub fn play(
+        &self,
+        project: ROProject,
+        starting_positions: Vec<ProjectLocation>,
+        scope: PlayScope,
+    ) {
         let (tx, rx) = mpsc::channel();
         {
             *self.playing.borrow_mut() = Some(tx);
         }
 
         std::thread::spawn(move || {
-            Self::play_thread(project, Arc::new(scope), rx);
+            Self::play_thread(project, starting_positions, scope, rx);
         });
     }
 
-    pub fn is_playing(&self) -> bool {
+    // set what to play after current thing finishes (regardless of if repeat is enabled)
+    pub fn play_buffered(&self, starting_positions: Vec<ProjectLocation>, scope: PlayScope) {
+        let playing = &self.playing.borrow();
+        let Some(playing_tx) = playing.as_ref() else {
+            return;
+        };
+        let _ = playing_tx.send(PlayerCmd::UpdateBuffer(starting_positions, scope));
+    }
+
+    pub fn stop(&self) {
+        self.send_command(PlayerCmd::Stop);
+    }
+
+    /// Used for pausing/unpausing
+    pub fn set_paused(&self, paused: bool) {
+        self.send_command(PlayerCmd::SetPaused(paused));
+    }
+
+    /// Returns true if not paused
+    pub fn is_paused(&self) -> bool {
+        let (tx, rx) = mpsc::channel();
+        self.send_command(PlayerCmd::RequestIsPaused(tx));
+        rx.recv().ok().unwrap_or(true)
+    }
+
+    /// i.e. if player is unpaused, things will be played
+    pub fn is_alive(&self) -> bool {
         let playing = &self.playing.borrow();
         let Some(tx) = playing.as_ref() else {
             return false;
@@ -85,38 +105,49 @@ impl Player {
         true
     }
 
-    pub fn send_command(&self, command: PlayerCmd) {
-        let playing = self.playing.borrow();
-        let Some(playing) = playing.as_ref() else {
-            return;
-        };
-        let _ = playing.send(command);
+    pub fn request_locations(&self) -> Option<Vec<ProjectLocation>> {
+        let (tx, rx) = mpsc::channel();
+        let playing = &self.playing.borrow();
+        let playing_tx = playing.as_ref()?;
+        playing_tx.send(PlayerCmd::RequestLocation(tx)).ok()?;
+        rx.recv().ok()
     }
 
-    fn play_thread(project: ROProject, mut scope: Arc<PlayerScope>, rx: Receiver<PlayerCmd>) {
+    pub fn request_scope(&self) -> Option<PlayScope> {
+        let (tx, rx) = mpsc::channel();
+        let playing = &self.playing.borrow();
+        let playing_tx = playing.as_ref()?;
+        playing_tx.send(PlayerCmd::RequestScope(tx)).ok()?;
+        rx.recv().ok()
+    }
+
+    fn send_command(&self, command: PlayerCmd) -> Option<()> {
+        let playing = self.playing.borrow();
+        let playing = playing.as_ref()?;
+        playing.send(command).ok()
+    }
+
+    fn play_thread(
+        project: ROProject,
+        starting_positions: Vec<ProjectLocation>,
+        mut scope: PlayScope,
+        rx: Receiver<PlayerCmd>,
+    ) {
         let note_pool = NotePool::default();
         let mut paused = false;
-
-        let mut i: i64 = -1;
 
         let mut last_note_time = Instant::now();
         let mut project_settings = project.read().unwrap().settings().clone();
 
         // buffer - move onto this after reaching end
-        let mut buffer: Option<Arc<PlayerScope>> = None;
+        //let mut buffer: Option<Arc<PlayerScope>> = None;
+        let mut buffer_locations: Option<Vec<ProjectLocation>> = None;
+        let mut buffer_scope: Option<PlayScope> = None;
 
         // if a position within a track is `None`, then the track is finished
-        let mut current_pos = scope
-            .first_notes
-            .iter()
-            .cloned()
-            .map(Some)
-            .collect::<Vec<Option<ProjectLocation>>>();
-
-        let mut to_end = false;
+        let mut current_pos = starting_positions.clone();
 
         'main: loop {
-            // handle commands
             let ms_per_note =
                 helpers::ticks_to_duration(1.0, project.read().unwrap().settings().tempo)
                     .as_millis();
@@ -124,13 +155,28 @@ impl Player {
             loop {
                 let timeout = ms_per_note.saturating_sub(last_note_time.elapsed().as_millis());
 
+                // check if finished
+                if current_pos.is_empty() {
+                    // check buffer
+                    if let (Some(blocation), Some(bscope)) =
+                        (buffer_locations.take(), buffer_scope.take())
+                    {
+                        current_pos = blocation;
+                        scope = bscope;
+                    } else {
+                        // otherwise, finish
+                        return;
+                    }
+                }
+
+                // handle commands
                 match rx.recv_timeout(Duration::from_millis(timeout as u64)) {
-                    Ok(PlayerCmd::UpdateBuffer(scope)) => {
-                        buffer = Some(scope.into());
+                    Ok(PlayerCmd::UpdateBuffer(location, scope)) => {
+                        buffer_locations = Some(location);
+                        buffer_scope = Some(scope);
                     }
                     Ok(PlayerCmd::Stop) => break 'main,
-                    Ok(PlayerCmd::Pause) => paused = true,
-                    Ok(PlayerCmd::Resume) => paused = false,
+                    Ok(PlayerCmd::SetPaused(p)) => paused = p,
                     Ok(PlayerCmd::RequestIsPaused(tx)) => {
                         let _ = tx.send(paused);
                     }
@@ -138,15 +184,12 @@ impl Player {
                         let _ = tx.send(current_pos.clone());
                     }
                     Ok(PlayerCmd::RequestScope(tx)) => {
-                        let _ = tx.send(scope.clone());
-                    }
-                    Ok(PlayerCmd::RequestBuffer(tx)) => {
-                        let _ = tx.send(buffer.clone());
+                        let _ = tx.send(scope);
                     }
                     Ok(PlayerCmd::Dummy) => (),
                     Err(RecvTimeoutError::Timeout) => (),
                     Err(RecvTimeoutError::Disconnected) => break 'main,
-                };
+                }
                 if !paused {
                     break;
                 }
@@ -164,64 +207,32 @@ impl Player {
                 continue;
             }
 
-            if to_end {
-                break;
-            }
-
             // start playing notes
-            i = i.saturating_add(1);
 
             let Ok(project) = project.read() else {
                 break;
             };
 
-            let mut all_tracks_finished = true;
-
             // go through each track and play the notes
-            for track_location_opt in current_pos.iter_mut() {
-                let Some(track_location) = track_location_opt else {
-                    continue;
-                };
+            last_note_time = Instant::now();
 
-                all_tracks_finished = false;
-
+            current_pos.retain_mut(|track_location| {
                 // play notes in each voice
                 for voice_idx in 0..VOICES_PER_TRACK {
                     note_pool.play_note(voice_idx, &project, track_location);
                 }
 
-                let new_location_opt = project.increment_project_location(*track_location);
-                match new_location_opt {
-                    Some(new_location) if Some(*track_location) != scope.last_note => {
-                        *track_location = new_location
-                    }
-                    _ => {
-                        *track_location_opt = None;
-                    }
-                };
-            }
-
-            // should end?
-            // if all_tracks_finished, move onto buffer. If there's no buffer, loop if loop_player
-            // setting is enabled.
-            if all_tracks_finished {
-                if let Some(new_scope) = buffer.take() {
-                    scope = new_scope;
-                    current_pos
-                        .iter_mut()
-                        .zip(scope.first_notes.iter())
-                        .for_each(|(current_pos, start_pos)| *current_pos = Some(*start_pos));
-                } else if project_settings.loop_player {
-                    current_pos
-                        .iter_mut()
-                        .zip(scope.first_notes.iter())
-                        .for_each(|(current_pos, start_pos)| *current_pos = Some(*start_pos));
+                if let Some(new_loc) = track_location.increment(
+                    &project,
+                    scope,
+                    project.settings().loop_player && buffer_locations.is_none(),
+                ) {
+                    *track_location = new_loc;
+                    true
                 } else {
-                    to_end = true;
+                    false
                 }
-            } else {
-                last_note_time = Instant::now();
-            }
+            });
         }
     }
 }
@@ -249,9 +260,9 @@ impl NotePool {
         }
 
         // fetch copy of note
-        let Some(mut note) = project
-            .get_notes_at_location(*location)
-            .and_then(|notes| notes.get(voice).map(|note| (*note).clone()))
+        let Some(mut note) = location
+            .get_notes_at_location(project)
+            .and_then(|notes| notes.get(voice).cloned())
         else {
             return;
         };
@@ -300,7 +311,7 @@ impl NotePool {
         let Some(data_table) = instrument
             .data_table_map
             .get::<usize>(semitone.into())
-            .cloned()
+            .copied()
             .flatten()
             .and_then(|index| instrument.data_tables.get(index))
             .cloned()
@@ -483,7 +494,7 @@ impl WavetableOscillator {
                     break;
                 }
                 Err(TryRecvError::Empty) => break,
-            };
+            }
         }
     }
 
@@ -548,14 +559,14 @@ impl WavetableOscillator {
                         let total_samples =
                             helpers::ticks_to_duration(time_ticks, self.project_settings.tempo)
                                 .as_secs_f64()
-                                * SAMPLE_RATE as f64;
+                                * f64::from(SAMPLE_RATE);
 
                         if total_samples <= 0. || self.slide_counter >= (total_samples as u64) {
                             break 'block 1.0;
                         }
 
-                        let start_semitone = start_semitone.value() as f64;
-                        let end_semitone = end_semitone.value() as f64;
+                        let start_semitone = f64::from(start_semitone.value());
+                        let end_semitone = f64::from(end_semitone.value());
 
                         let actual_semitone = start_semitone
                             + (((end_semitone - start_semitone) / total_samples)

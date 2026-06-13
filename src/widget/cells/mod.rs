@@ -73,7 +73,7 @@ where
                     if self
                         .state
                         .get(row, column)
-                        .is_some_and(|cell| cell.highlightable())
+                        .is_some_and(cell_data::CellData::highlightable)
                     {
                         self.state.set_highlighted_row(row);
                         self.state.set_highlighted_col(column);
