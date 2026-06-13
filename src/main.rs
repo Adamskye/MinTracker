@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 use std::{
     fs::File,
     path::PathBuf,
