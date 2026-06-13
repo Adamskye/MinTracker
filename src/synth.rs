@@ -147,7 +147,8 @@ impl Player {
         // if a position within a track is `None`, then the track is finished
         let mut current_pos = starting_positions.clone();
 
-        'main: loop {
+        let mut to_finish = false;
+        loop {
             let ms_per_note =
                 helpers::ticks_to_duration(1.0, project.read().unwrap().settings().tempo)
                     .as_millis();
@@ -165,9 +166,9 @@ impl Player {
                         scope = bscope;
                     } else {
                         // otherwise, finish
-                        return;
+                        to_finish = true;
                     }
-                }
+                };
 
                 // handle commands
                 match rx.recv_timeout(Duration::from_millis(timeout as u64)) {
@@ -175,7 +176,7 @@ impl Player {
                         buffer_locations = Some(location);
                         buffer_scope = Some(scope);
                     }
-                    Ok(PlayerCmd::Stop) => break 'main,
+                    Ok(PlayerCmd::Stop) => return,
                     Ok(PlayerCmd::SetPaused(p)) => paused = p,
                     Ok(PlayerCmd::RequestIsPaused(tx)) => {
                         let _ = tx.send(paused);
@@ -188,7 +189,7 @@ impl Player {
                     }
                     Ok(PlayerCmd::Dummy) => (),
                     Err(RecvTimeoutError::Timeout) => (),
-                    Err(RecvTimeoutError::Disconnected) => break 'main,
+                    Err(RecvTimeoutError::Disconnected) => return,
                 }
                 if !paused {
                     break;
@@ -207,15 +208,17 @@ impl Player {
                 continue;
             }
 
-            // start playing notes
+            if to_finish {
+                return;
+            }
 
             let Ok(project) = project.read() else {
                 break;
             };
 
-            // go through each track and play the notes
             last_note_time = Instant::now();
 
+            // go through each track and play the notes
             current_pos.retain_mut(|track_location| {
                 // play notes in each voice
                 for voice_idx in 0..VOICES_PER_TRACK {

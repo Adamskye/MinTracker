@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, Key, ScrollArea, Sense, Ui};
+use egui::{Align2, Color32, Event, EventFilter, Key, ScrollArea, Sense, Ui};
 use egui_phosphor::regular::{self, FUNCTION, MINUS};
 
 use crate::{
@@ -73,7 +73,9 @@ impl CellData<GridState> for CellState {
                     .and_then(|phrase| phrase.voices.get(*voice))
                     .and_then(|v| v.notes.get(*row))
                     .filter(|n| !n.effects.is_empty())
-                    .map_or(default, |_| helpers::to_colour32(state.preferences().style.colours.highlighted))
+                    .map_or(default, |_| {
+                        helpers::to_colour32(state.preferences().style.colours.highlighted)
+                    })
             }
             _ => default,
         }
@@ -146,37 +148,59 @@ impl CellData<GridState> for CellState {
         let Self::Note { note, row, voice } = self else {
             return None;
         };
-        let mut note = note.clone();
+        let mut new_note = note.clone();
 
         // get the currently viewed phrase
         let phrase_id = state.viewed_phrase?;
 
-        if input.key_pressed(state.preferences().keybinds.increase) {
-            note.semitone = note.semitone.map(|s| s.transposed_by(1));
-            if note.semitone.is_none() {
-                note.semitone = Some(grid_state.last_semitone);
-            }
-        } else if input.key_pressed(state.preferences().keybinds.decrease) {
-            note.semitone = note.semitone.map(|s| s.transposed_by(-1));
-            if note.semitone.is_none() {
-                note.semitone = Some(grid_state.last_semitone);
-            }
-        } else if input.key_pressed(state.preferences().keybinds.delete) {
-            note.semitone = None;
-        } else {
-            return None;
+        // handling transpose
+        let transpose_amount = input.events.iter().find_map(|evt| {
+            let Event::Key {
+                physical_key,
+                pressed: true,
+                modifiers,
+                ..
+            } = evt
+            else {
+                return None;
+            };
+            let key = (*physical_key)?;
+
+            let transpose_amount = if key == state.preferences().keybinds.increase {
+                1
+            } else if key == state.preferences().keybinds.decrease {
+                -1
+            } else {
+                return None;
+            } * if modifiers.shift { 12 } else { 1 };
+
+            Some(transpose_amount)
+        });
+
+        if let Some(ta) = transpose_amount {
+            new_note.semitone = new_note
+                .semitone
+                .map(|s| s.transposed_by(ta))
+                .or(Some(grid_state.last_semitone));
         }
 
-        if let Some(s) = note.semitone {
+        // handling delete
+        if input.key_pressed(state.preferences().keybinds.delete) {
+            new_note.semitone = None;
+        }
+
+        if let Some(s) = new_note.semitone {
             grid_state.last_semitone = s;
         }
 
-        project.push_cmd(PhraseCmd::UpdateNote {
-            id: phrase_id,
-            voice_index: *voice,
-            note_index: *row,
-            new_note: note,
-        });
+        if new_note != *note {
+            project.push_cmd(PhraseCmd::UpdateNote {
+                id: phrase_id,
+                voice_index: *voice,
+                note_index: *row,
+                new_note,
+            });
+        }
 
         None
     }
