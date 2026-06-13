@@ -27,11 +27,6 @@ pub trait CellData<G> {
         false
     }
 
-    /// Background colour of cell.
-    fn color(&self, _shared_data: &G) -> Color32 {
-        Color32::TRANSPARENT
-    }
-
     /// Whether this cell has a context menu when right-clicked.
     fn has_context_menu(&self) -> bool {
         false

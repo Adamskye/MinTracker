@@ -34,10 +34,6 @@ pub enum TrackCellData {
 }
 
 impl CellData<GridSharedData> for TrackCellData {
-    fn color(&self, _: &GridSharedData) -> Color32 {
-        Color32::TRANSPARENT
-    }
-
     fn text(&self) -> Option<String> {
         match self {
             TrackCellData::Empty => None,
@@ -278,7 +274,9 @@ impl Default for TrackUI {
     fn default() -> Self {
         Self {
             clipboard: Default::default(),
-            cell_grid: CellGridWidget::new(CHAINS_PER_TRACK, 0, GridSharedData::default()),
+            cell_grid: CellGridWidget::new(CHAINS_PER_TRACK, 0, GridSharedData::default())
+                .shade_every(4)
+                .start_shade_at(1),
             grid_update_ts: None,
         }
     }
@@ -537,7 +535,11 @@ impl TrackUI {
             .cell_grid
             .state
             .selection
-            .as_ref().map_or_else(|| self.cell_grid.state.highlighted_position().0, super::super::widget::cells::selection::GridSelection::small_row)
+            .as_ref()
+            .map_or_else(
+                || self.cell_grid.state.highlighted_position().0,
+                super::super::widget::cells::selection::GridSelection::small_row,
+            )
             .checked_sub(1)
         else {
             return;

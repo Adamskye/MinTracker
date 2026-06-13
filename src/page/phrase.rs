@@ -262,7 +262,8 @@ impl Default for PhraseUI {
                 ROWS_PER_PHRASE,
                 VOICES_PER_TRACK * 2,
                 GridState::default(),
-            ),
+            )
+            .shade_every(4),
             last_seen_phrase_id: None,
         }
     }

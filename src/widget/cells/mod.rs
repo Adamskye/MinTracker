@@ -6,7 +6,7 @@ pub mod state;
 use std::marker::PhantomData;
 
 use eframe::egui::{self, Color32, Id, Rect, Sense, Stroke, Ui, UiBuilder};
-use egui::{FontId, Response, Vec2};
+use egui::{FontId, Painter, Pos2, Response, Vec2};
 
 use crate::{
     AppUIState,
@@ -25,6 +25,8 @@ where
 {
     pub shared_data: G,
     pub state: CellGridState<T, G>,
+    shade_every: Option<usize>,
+    start_shade_at: usize,
 
     _marker: std::marker::PhantomData<G>,
 }
@@ -37,12 +39,25 @@ where
         Self {
             shared_data,
             state: CellGridState::new(num_rows, num_columns),
+            shade_every: None,
+            start_shade_at: 0,
             _marker: PhantomData,
         }
     }
 
+    pub fn shade_every(mut self, every: usize) -> Self {
+        self.shade_every = Some(every);
+        self
+    }
+
+    pub fn start_shade_at(mut self, at: usize) -> Self {
+        self.start_shade_at = at;
+        self
+    }
+
     /// T is the type of data stored in each cell, and G is the type of data that is shared across all
     /// cells.
+    /// `shade_every` allows you to specify how often the row shading should alternate.
     pub fn show(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project)
     where
         T: Default + Clone + CellData<G>,
@@ -97,6 +112,12 @@ where
             project,
         );
 
+        // drawing background if `shade_every` is specified
+        if let Some(every) = self.shade_every {
+            self.draw_alternating_background(ui, every, cell_size, grid_rect);
+        }
+
+        // showing all cells
         for row in 0..self.state.num_rows() {
             for column in 0..self.state.num_columns() {
                 let Some(cell_data) = self.state.get(row, column).cloned() else {
@@ -122,6 +143,44 @@ where
                     project,
                 );
             }
+        }
+    }
+
+    fn draw_alternating_background(
+        &self,
+        ui: &Ui,
+        shade_every: usize,
+        cell_size: Vec2,
+        grid_rect: Rect,
+    ) {
+        let painter = ui.painter();
+        let c_height = cell_size.y;
+        let rows = self.state.num_rows();
+        let columns = self.state.num_columns();
+        let origin = grid_rect.min;
+
+        let mut position = self.start_shade_at;
+        loop {
+            if position >= rows {
+                // done
+                return;
+            }
+
+            // shade
+            let rows_to_shade = shade_every.min(rows - position) as f32;
+            let pos_f32 = position as f32;
+            let rect = Rect {
+                min: (origin.x, origin.y + (c_height * pos_f32)).into(),
+                max: (
+                    origin.x + (columns as f32 * cell_size.x),
+                    origin.y + ((c_height * pos_f32) + (c_height * rows_to_shade)),
+                )
+                    .into(),
+            };
+
+            painter.rect_filled(rect, 0, Color32::GRAY.gamma_multiply(0.1));
+
+            position += shade_every + shade_every;
         }
     }
 }
@@ -303,12 +362,6 @@ where
             self.row == env.highlighted_row() && self.column == env.highlighted_col();
         let select_colour = state.preferences().style.colours.highlighted;
         let painter = ui.painter();
-
-        // drawing background (if not transparent)
-        let cell_color = self.cell_data.color(shared_data);
-        if cell_color != Color32::TRANSPARENT {
-            painter.rect_filled(self.cell_rect, 0.0, cell_color);
-        }
 
         // drawing border
         if cell_is_highlighted {

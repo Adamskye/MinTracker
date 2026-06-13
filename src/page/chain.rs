@@ -48,10 +48,6 @@ impl CellData<GridState> for CellState {
         }
     }
 
-    fn color(&self, _grid_state: &GridState) -> Color32 {
-        Color32::TRANSPARENT
-    }
-
     fn has_inner_widget(&self, grid_state: &mut GridState) -> bool {
         match self {
             CellState::Phrase { row, .. } => Some(*row) == grid_state.playing_row,
@@ -307,7 +303,7 @@ impl Default for ChainUI {
     fn default() -> Self {
         Self {
             clipboard: Default::default(),
-            cell_grid: CellGridWidget::new(ROWS_PER_CHAIN, 2, GridState::default()),
+            cell_grid: CellGridWidget::new(ROWS_PER_CHAIN, 2, GridState::default()).shade_every(2),
         }
     }
 }
@@ -495,11 +491,10 @@ impl ChainUI {
             return;
         };
 
-        let start_row = self
-            .cell_grid
-            .state
-            .selection
-            .as_ref().map_or_else(|| self.cell_grid.state.highlighted_position().0, super::super::widget::cells::selection::GridSelection::small_row);
+        let start_row = self.cell_grid.state.selection.as_ref().map_or_else(
+            || self.cell_grid.state.highlighted_position().0,
+            super::super::widget::cells::selection::GridSelection::small_row,
+        );
 
         // paste from clipboard, starting at row
         match &self.clipboard {
