@@ -11,6 +11,8 @@ pub struct CellGridState<T, G> {
     num_columns: usize,
     highlighted_row: usize,
     highlighted_col: usize,
+    /// temporarily set to true if input was consumed by a cell
+    pub(super) input_consumed_marker: bool,
 
     grid: Vec<Vec<T>>,
 
@@ -29,6 +31,7 @@ where
             num_columns,
             highlighted_row: 0,
             highlighted_col: 0,
+            input_consumed_marker: false,
             grid: vec![vec![T::default(); num_columns]; num_rows],
             _marker: std::marker::PhantomData,
             selection: None,
@@ -101,6 +104,11 @@ where
         state: &mut AppUIState,
         project: &Project,
     ) {
+        if self.input_consumed_marker {
+            self.input_consumed_marker = false;
+            return;
+        }
+
         // handle keyboard input
         let mut should_scroll_to_highlighted = false;
         ui.input(|i| {

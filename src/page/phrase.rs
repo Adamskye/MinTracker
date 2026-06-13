@@ -229,16 +229,19 @@ impl CellState {
 
         if input.key_pressed(state.preferences().keybinds.down) && *row >= ROWS_PER_PHRASE - 1 {
             if go_to_next(state, project) {
-                Some(CellGridEvent::SetHighlightedPosition(0, voice))
+                Some(CellGridEvent::Multiple(vec![
+                    CellGridEvent::ConsumeInput,
+                    CellGridEvent::SetHighlightedPosition(0, voice),
+                ]))
             } else {
                 None
             }
         } else if input.key_pressed(state.preferences().keybinds.up) && *row == 0 {
             if go_to_previous(state, project) {
-                Some(CellGridEvent::SetHighlightedPosition(
-                    ROWS_PER_PHRASE - 1,
-                    voice,
-                ))
+                Some(CellGridEvent::Multiple(vec![
+                    CellGridEvent::ConsumeInput,
+                    CellGridEvent::SetHighlightedPosition(ROWS_PER_PHRASE - 1, voice),
+                ]))
             } else {
                 None
             }

@@ -103,15 +103,6 @@ where
                 .set_highlighted_row(self.state.num_rows().saturating_sub(1));
         }
 
-        self.state.handle_global_keyboard_input(
-            ui,
-            &mut self.shared_data,
-            cell_size,
-            grid_rect,
-            state,
-            project,
-        );
-
         // drawing background if `shade_every` is specified
         if let Some(every) = self.shade_every {
             self.draw_alternating_background(ui, every, cell_size, grid_rect);
@@ -144,6 +135,16 @@ where
                 );
             }
         }
+
+        // global keyboard input (e.g. moving up, down, left, and right)
+        self.state.handle_global_keyboard_input(
+            ui,
+            &mut self.shared_data,
+            cell_size,
+            grid_rect,
+            state,
+            project,
+        );
     }
 
     fn draw_alternating_background(
@@ -424,6 +425,12 @@ where
         CellGridEvent::SetHighlightedPosition(row, col) => {
             env.set_highlighted_row(row);
             env.set_highlighted_col(col);
+        }
+        CellGridEvent::ConsumeInput => env.input_consumed_marker = true,
+        CellGridEvent::Multiple(evts) => {
+            for evt in evts {
+                trigger_event(evt, env);
+            }
         }
     }
 }
