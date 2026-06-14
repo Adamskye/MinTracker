@@ -6,7 +6,7 @@ pub mod state;
 use std::marker::PhantomData;
 
 use eframe::egui::{self, Color32, Id, Rect, Sense, Stroke, Ui, UiBuilder};
-use egui::{FontId, Painter, Pos2, Response, Vec2};
+use egui::{FontId, Response, Vec2};
 
 use crate::{
     AppUIState,
@@ -367,12 +367,12 @@ where
         // drawing border
         if cell_is_highlighted {
             // highlighted
-            let stroke = Stroke::new(2.0, to_colour32(select_colour));
+            let stroke = Stroke::new(2.0_f32, to_colour32(select_colour));
             painter.rect_stroke(self.cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
         } else if response.hovered() || response.is_pointer_button_down_on() {
             // mouse over
             let stroke = Stroke::new(
-                2.0,
+                2.0_f32,
                 to_colour32(state.preferences().style.colours.button_bg),
             );
             painter.rect_stroke(self.cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
@@ -391,7 +391,7 @@ where
                 && self.column <= start_col.max(end_col)
             {
                 let colour = to_colour32(select_colour).linear_multiply(0.5);
-                let stroke = Stroke::new(2.0, colour);
+                let stroke = Stroke::new(2.0_f32, colour);
                 painter.rect_stroke(self.cell_rect, 0.0, stroke, egui::StrokeKind::Inside);
             }
         }

@@ -1,8 +1,5 @@
-use eframe::{
-    egui::{ScrollArea, Ui},
-    epaint::Color32,
-};
-use egui::Event;
+use eframe::egui::{ScrollArea, Ui};
+use egui::{Button, Event};
 use egui_phosphor::regular;
 
 use crate::{
@@ -354,12 +351,24 @@ impl Page for ChainUI {
 }
 
 impl ChainUI {
-    fn handle_keybinds(&mut self, ui: &mut Ui, state: &AppUIState, project: &Project) {
+    fn handle_keybinds(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
         ui.input(|i| {
             if i.events.iter().any(|e| matches!(e, Event::Copy)) {
                 self.copy_selection(project, state);
             } else if i.modifiers.command && i.events.iter().any(|e| matches!(e, Event::Paste(_))) {
                 self.paste_clipboard(project, state);
+            }
+
+            if i.key_pressed(state.preferences().keybinds.up_screen) {
+                if let Some((row, chain)) = get_previous_row_and_chain(state, project) {
+                    state.track_selected_row = Some(row);
+                    state.viewed_chain = Some(chain);
+                }
+            } else if i.key_pressed(state.preferences().keybinds.down_screen) {
+                if let Some((row, chain)) = get_next_row_and_chain(state, project) {
+                    state.track_selected_row = Some(row);
+                    state.viewed_chain = Some(chain);
+                }
             }
         });
     }
@@ -408,39 +417,24 @@ impl ChainUI {
     }
 
     fn up_down_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        let Some(current_row) = state.track_selected_row else {
-            return;
-        };
-
-        let Some(track) = state
-            .viewed_track
-            .and_then(|track_idx| project.tracks().get(track_idx))
-        else {
-            return;
-        };
-
-        if ui.small_button(regular::ARROW_UP).clicked() {
-            for i in (0..current_row).rev() {
-                let Some(chain_id) = track.chains.get(i) else {
-                    continue;
-                };
-
-                state.track_selected_row = Some(i);
-                state.viewed_chain = *chain_id;
-                break;
+        let up_button = Button::new(regular::ARROW_UP).small();
+        if let Some((row, chain)) = get_previous_row_and_chain(state, project) {
+            if ui.add(up_button).clicked() {
+                state.track_selected_row = Some(row);
+                state.viewed_chain = Some(chain);
             }
+        } else {
+            ui.add_enabled(false, up_button);
         }
 
-        if ui.small_button(regular::ARROW_DOWN).clicked() {
-            for i in (current_row + 1)..track.chains.len() {
-                let Some(Some(chain_id)) = track.chains.get(i) else {
-                    continue;
-                };
-
-                state.track_selected_row = Some(i);
-                state.viewed_chain = Some(*chain_id);
-                break;
+        let down_button = Button::new(regular::ARROW_DOWN).small();
+        if let Some((row, chain)) = get_next_row_and_chain(state, project) {
+            if ui.add(down_button).clicked() {
+                state.track_selected_row = Some(row);
+                state.viewed_chain = Some(chain);
             }
+        } else {
+            ui.add_enabled(false, down_button);
         }
     }
 
@@ -551,4 +545,32 @@ impl ChainUI {
             })
             .collect()
     }
+}
+
+fn get_previous_row_and_chain(state: &AppUIState, project: &Project) -> Option<(usize, u32)> {
+    let current_row = state.track_selected_row?;
+    let track = project.tracks().get(state.viewed_track?)?;
+    for i in (0..current_row).rev() {
+        let Some(Some(chain_id)) = track.chains.get(i) else {
+            continue;
+        };
+
+        return Some((i, *chain_id));
+    }
+    None
+}
+
+fn get_next_row_and_chain(state: &AppUIState, project: &Project) -> Option<(usize, u32)> {
+    let current_row = state.track_selected_row?;
+    let track = project.tracks().get(state.viewed_track?)?;
+
+    for i in (current_row + 1)..track.chains.len() {
+        let Some(Some(chain_id)) = track.chains.get(i) else {
+            continue;
+        };
+
+        return Some((i, *chain_id));
+    }
+
+    None
 }

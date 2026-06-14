@@ -212,6 +212,10 @@ impl MinTracker {
                 .then(|| new = Some(PageID::Instrument));
             ui.key_pressed(kb.show_preferences)
                 .then(|| new = Some(PageID::Preferences));
+            ui.key_pressed(kb.forward_screen)
+                .then(|| new = Some(self.ui_state.current_page.go_forward()));
+            ui.key_pressed(kb.back_screen)
+                .then(|| new = Some(self.ui_state.current_page.go_back()));
 
             if let Some(new_page) = new {
                 self.ui_state.current_page = new_page;
@@ -433,11 +437,11 @@ impl MinTracker {
 
     fn pages_panel(&mut self, ui: &mut Ui) {
         let kb = &self.ui_state.preferences().keybinds;
+        let instruments_kb = kb.show_instruments;
         let pages = [
             ("Tracks", PageID::Track, kb.show_tracks),
             ("Chains", PageID::Chain, kb.show_chains),
             ("Phrases", PageID::Phrase, kb.show_phrases),
-            ("Instruments", PageID::Instrument, kb.show_instruments),
         ];
 
         for (label, page_id, keybind) in pages.into_iter().rev() {
@@ -445,6 +449,16 @@ impl MinTracker {
             ui.selectable_value(&mut self.ui_state.current_page, page_id, label)
                 .on_hover_text(tooltip);
         }
+
+        // instrument page
+        ui.add_space(20.0);
+        let tooltip = format!("Instruments ({:?})", instruments_kb);
+        ui.selectable_value(
+            &mut self.ui_state.current_page,
+            PageID::Instrument,
+            "Instruments",
+        )
+        .on_hover_text(tooltip);
     }
 
     fn update_page(&mut self, ui: &mut Ui) {

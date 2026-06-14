@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, Event, EventFilter, Key, ScrollArea, Sense, Ui};
+use egui::{Align2, Button, Color32, Event, Key, ScrollArea, Sense, Ui};
 use egui_phosphor::regular::{self, FUNCTION, MINUS};
 
 use crate::{
@@ -228,23 +228,23 @@ impl CellState {
         };
 
         if input.key_pressed(state.preferences().keybinds.down) && *row >= ROWS_PER_PHRASE - 1 {
-            if go_to_next(state, project) {
-                Some(CellGridEvent::Multiple(vec![
+            get_next_row_and_phrase(state, project).map(|(row, phrase)| {
+                state.chain_selected_row = Some(row);
+                state.viewed_phrase = Some(phrase);
+                CellGridEvent::Multiple(vec![
                     CellGridEvent::ConsumeInput,
                     CellGridEvent::SetHighlightedPosition(0, voice),
-                ]))
-            } else {
-                None
-            }
+                ])
+            })
         } else if input.key_pressed(state.preferences().keybinds.up) && *row == 0 {
-            if go_to_previous(state, project) {
-                Some(CellGridEvent::Multiple(vec![
+            get_previous_row_and_phrase(state, project).map(|(row, phrase)| {
+                state.chain_selected_row = Some(row);
+                state.viewed_phrase = Some(phrase);
+                CellGridEvent::Multiple(vec![
                     CellGridEvent::ConsumeInput,
                     CellGridEvent::SetHighlightedPosition(ROWS_PER_PHRASE - 1, voice),
-                ]))
-            } else {
-                None
-            }
+                ])
+            })
         } else {
             None
         }
@@ -274,6 +274,8 @@ impl Default for PhraseUI {
 
 impl Page for PhraseUI {
     fn update(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
+        self.handle_keybinds(ui, state, project);
+
         if self.last_seen_phrase_id != state.viewed_phrase {
             self.handle_player_buffering(state);
         }
@@ -300,12 +302,24 @@ impl Page for PhraseUI {
     }
 
     fn draw_side_buttons(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
-        if ui.small_button(regular::ARROW_UP).clicked() {
-            go_to_previous(state, project);
+        let up_button = Button::new(regular::ARROW_UP).small();
+        if let Some((row, phrase)) = get_previous_row_and_phrase(state, project) {
+            if ui.add(up_button).clicked() {
+                state.chain_selected_row = Some(row);
+                state.viewed_phrase = Some(phrase);
+            }
+        } else {
+            ui.add_enabled(false, up_button);
         }
 
-        if ui.small_button(regular::ARROW_DOWN).clicked() {
-            go_to_next(state, project);
+        let down_button = Button::new(regular::ARROW_DOWN).small();
+        if let Some((row, phrase)) = get_next_row_and_phrase(state, project) {
+            if ui.add(down_button).clicked() {
+                state.chain_selected_row = Some(row);
+                state.viewed_phrase = Some(phrase);
+            }
+        } else {
+            ui.add_enabled(false, down_button);
         }
     }
 
@@ -478,59 +492,45 @@ impl PhraseUI {
             .player
             .play_buffered(vec![starting_position], PlayScope::Phrase);
     }
+
+    fn handle_keybinds(&mut self, ui: &mut Ui, state: &mut AppUIState, project: &Project) {
+        ui.input(|i| {
+            if i.key_pressed(state.preferences().keybinds.up_screen) {
+                if let Some((row, phrase)) = get_previous_row_and_phrase(state, project) {
+                    state.chain_selected_row = Some(row);
+                    state.viewed_phrase = Some(phrase);
+                }
+            } else if i.key_pressed(state.preferences().keybinds.down_screen) {
+                if let Some((row, phrase)) = get_next_row_and_phrase(state, project) {
+                    state.chain_selected_row = Some(row);
+                    state.viewed_phrase = Some(phrase);
+                }
+            }
+        });
+    }
 }
 
-fn go_to_previous(state: &mut AppUIState, project: &Project) -> bool {
-    let Some(chain) = state
-        .viewed_chain
-        .and_then(|chain_idx| project.chains().get(&chain_idx))
-    else {
-        return false;
-    };
-
-    let Some(current_row) = state.chain_selected_row else {
-        return false;
-    };
-
-    if let Some((new_idx, new_row)) = chain
+fn get_previous_row_and_phrase(state: &mut AppUIState, project: &Project) -> Option<(usize, u32)> {
+    let chain = project.chains().get(&state.viewed_chain?)?;
+    let current_row = state.chain_selected_row?;
+    chain
         .rows
         .iter()
         .enumerate()
         .take(current_row)
         .rev()
-        .find(|(_, row)| row.phrase.is_some())
-    {
-        state.chain_selected_row = Some(new_idx);
-        state.viewed_phrase = new_row.phrase;
-        true
-    } else {
-        false
-    }
+        .filter_map(|(idx, row)| row.phrase.map(|p| (idx, p)))
+        .next()
 }
 
-fn go_to_next(state: &mut AppUIState, project: &Project) -> bool {
-    let Some(chain) = state
-        .viewed_chain
-        .and_then(|chain_idx| project.chains().get(&chain_idx))
-    else {
-        return false;
-    };
-
-    let Some(current_row) = state.chain_selected_row else {
-        return false;
-    };
-
-    if let Some((new_idx, new_row)) = chain
+fn get_next_row_and_phrase(state: &mut AppUIState, project: &Project) -> Option<(usize, u32)> {
+    let chain = project.chains().get(&state.viewed_chain?)?;
+    let current_row = state.chain_selected_row?;
+    chain
         .rows
         .iter()
         .enumerate()
         .skip(current_row + 1)
-        .find(|(_, row)| row.phrase.is_some())
-    {
-        state.chain_selected_row = Some(new_idx);
-        state.viewed_phrase = new_row.phrase;
-        true
-    } else {
-        false
-    }
+        .filter_map(|(idx, row)| row.phrase.map(|p| (idx, p)))
+        .next()
 }

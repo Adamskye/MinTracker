@@ -119,6 +119,7 @@ impl PreferencesUI {
             ui_state.modify_preferences(|prefs| prefs.general = General::default());
         }
     }
+
     fn keybinds_tab(&mut self, ui: &mut Ui, ui_state: &mut AppUIState) {
         egui::Grid::new("keybinds_grid")
             .num_columns(2)
@@ -147,7 +148,10 @@ impl PreferencesUI {
                 keybind_row!("Right", right);
                 keybind_row!("Increase", increase);
                 keybind_row!("Decrease", decrease);
+                keybind_row!("Delete", delete);
                 keybind_row!("Play/Pause", play_pause);
+                keybind_row!("Forward Page", forward_screen);
+                keybind_row!("Back Page", back_screen);
                 keybind_row!("Show Tracks", show_tracks);
                 keybind_row!("Show Chains", show_chains);
                 keybind_row!("Show Phrases", show_phrases);
@@ -228,11 +232,7 @@ impl PreferencesUI {
                     .selected_text(format!("{:.2}", style.ui_scale))
                     .show_ui(ui, |ui| {
                         for scale in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0] {
-                            ui.selectable_value(
-                                &mut style.ui_scale,
-                                scale,
-                                format!("{scale:.2}"),
-                            );
+                            ui.selectable_value(&mut style.ui_scale, scale, format!("{scale:.2}"));
                         }
                     });
                 ui.end_row();

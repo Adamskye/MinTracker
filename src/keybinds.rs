@@ -22,6 +22,11 @@ pub struct Keybinds {
     pub show_preferences: Key,
 
     pub trigger_cell: Key,
+
+    pub forward_screen: Key,
+    pub back_screen: Key,
+    pub up_screen: Key,
+    pub down_screen: Key,
 }
 
 impl Default for Keybinds {
@@ -39,10 +44,15 @@ impl Default for Keybinds {
 
             play_pause: Key::Space,
 
+            forward_screen: Key::ArrowRight,
+            back_screen: Key::ArrowLeft,
+            up_screen: Key::ArrowUp,
+            down_screen: Key::ArrowDown,
+
             show_tracks: Key::F1,
             show_chains: Key::F2,
             show_phrases: Key::F3,
-            show_instruments: Key::F4,
+            show_instruments: Key::I,
             show_preferences: Key::P,
 
             trigger_cell: Key::Enter,

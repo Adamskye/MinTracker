@@ -80,14 +80,14 @@ impl Colours {
             style.visuals.widgets.active.weak_bg_fill = to_colour32(self.button_bg);
 
             style.visuals.widgets.noninteractive.bg_stroke =
-                Stroke::new(1.0, to_colour32(self.button_bg).linear_multiply(1.25));
+                Stroke::new(1.0_f32, to_colour32(self.button_bg).linear_multiply(1.25));
             style.visuals.widgets.inactive.bg_stroke =
-                Stroke::new(1.0, to_colour32(self.button_bg).linear_multiply(1.25));
+                Stroke::new(1.0_f32, to_colour32(self.button_bg).linear_multiply(1.25));
             style.visuals.widgets.hovered.bg_stroke =
-                Stroke::new(1.0, to_colour32(self.button_bg).linear_multiply(2.0));
+                Stroke::new(1.0_f32, to_colour32(self.button_bg).linear_multiply(2.0));
             style.visuals.widgets.hovered.expansion = 0.0;
             style.visuals.widgets.active.bg_stroke =
-                Stroke::new(1.0, to_colour32(self.button_bg).linear_multiply(1.25));
+                Stroke::new(1.0_f32, to_colour32(self.button_bg).linear_multiply(1.25));
 
             style.visuals.panel_fill = to_colour32(self.window_bg);
             style.visuals.striped = true;

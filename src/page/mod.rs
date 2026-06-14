@@ -79,3 +79,34 @@ pub enum PageID {
     Instrument,
     Preferences,
 }
+
+impl PageID {
+    fn page_hierarchy() -> [PageID; 3] {
+        [PageID::Track, PageID::Chain, PageID::Phrase]
+    }
+
+    /// Go to `previous` page
+    /// Note that this doesn't mean previous to mean whatever page the viewer was on last. Rather,
+    /// it means the previous page in the hierarchy, so for example: phrase goes back to chain,
+    /// which goes back to track
+    pub fn go_back(&self) -> PageID {
+        let hierarchy = Self::page_hierarchy();
+        for i in 0..hierarchy.len() {
+            if hierarchy[i] == *self {
+                return *hierarchy.get(i.saturating_sub(1)).unwrap_or(self);
+            }
+        }
+        *self
+    }
+
+    /// Opposite of go_back
+    pub fn go_forward(&self) -> PageID {
+        let hierarchy = Self::page_hierarchy();
+        for i in 0..hierarchy.len() {
+            if hierarchy[i] == *self {
+                return *hierarchy.get(i + 1).unwrap_or(self);
+            }
+        }
+        *self
+    }
+}
